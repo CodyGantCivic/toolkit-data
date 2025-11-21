@@ -1,0 +1,207 @@
+{
+  "adfs": {
+    "name": "ADFS Redirect",
+    "description": "Automatically redirect to internal login page.",
+    "enabled-by-default": true,
+    "version-introduced": "1.0.0",
+    "help-text": "This tool will automatically redirect the login page (on sites that don't use their own SAML server) to the CivicPlus ADFS server. This makes logging into sites quicker and easier."
+  },
+  "allow-open-in-new-tab": {
+    "name": "Allow items to be opened in new tab",
+    "description": "Allows most item categories, along with some items in categories, to open in a new tab.",
+    "enabled-by-default": true,
+    "version-introduced": "1.3.2",
+    "settings-link": {
+      "url": "/html/help.html#allow-open-in-new-tab",
+      "text": "See compatible modules"
+    },
+    "help-text": "Allows most item categories to open in a new tab. Also allows quick links, info advanced, and graphic links to open in a new tab."
+  },
+  "auto-dismiss-help-welcome": {
+    "name": "Auto-dismiss Help and Welcome Messages",
+    "description": "Automatically dismisses welcome and help messages.",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.0",
+    "help-text": "Automatically dismisses welcome and help messages."
+  },
+  "cp-tools-status": {
+    "name": "CP Tools Site Status",
+    "description": "Displays the status of the site from CP Tools in the admin bar.",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.2",
+    "help-text": "Displays the status of the site from CP Tools in the admin bar. You can click the status to visit CP Tools for the site."
+  },
+  "cp-ImportFancyButton": {
+    "name": "Import Fancy Buttons",
+    "description": "Allows you to Import Default Fancy Buttons.",
+    "enabled-by-default": true,
+    "version-introduced": "1.6.0",
+    "help-text": "Allows you to Import from a list of Default Fancy Buttons to the Graphic Links Module."
+  },
+  "cp-MultipleCategoryUpload": {
+    "name": "Multiple Category Upload",
+    "description": "Upload Multiple Categories at a time for several modules.",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.9",
+    "help-text": "Upload Multiple Categories at a time for the Graphic Links, Quick Links, Info Advanced, Form Center, Calendar, and News Flash modules."
+  },
+  "cp-MultipleItemUpload": {
+    "name": "News Flash Related Categories Upload",
+    "description": "Displays a related Categories section for new News Flash items.",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.9",
+    "help-text": "Displays a related Categories section for new News Flash items."
+  },
+  "cp-MultipleQuickLinks": {
+    "name": "Multiple Quick Links Upload",
+    "description": "Allows you to upload multiple Quick Links at a single time.",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.9",
+    "help-text": "Allows you to upload multiple Quick Links at a single time via the appended 'Post Items' button."
+  },
+  "download-xml-css": {
+    "name": "Download XML/CSS",
+    "description": "Adds the ability to download a layout's XML and/or CSS from the Layout Manager",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.0",
+    "help-text": "Adds the ability to download a layout's XML and/or CSS from the Layout Manager."
+  },
+  "enforce-advanced-styles-text-limits": {
+    "name": "Enforce advanced styles text limits",
+    "description": "Enforce the 1000 character limit on widget skins and the 255 character limit on widget option sets.",
+    "enabled-by-default": true,
+    "version-introduced": "1.3.5",
+    "help-text": "This tool enforces the 1000 character limit on widget skins and the 255 character limit on widget option sets."
+  },
+  "module-icons": {
+    "name": "Favorite Module Icons",
+    "description": "Add icons and bold the text of favorite modules in the modules menu.",
+    "enabled-by-default": true,
+    "version-introduced": "1.0.0",
+    "settings-link": {
+      "url": "/html/options.html#favorite-modules",
+      "text": "Edit Favorite Modules"
+    },
+    "help-text": "This tool adds icons and bolds the text of favorite modules in the modules menu. You can add or remove favorite modules on the settings page."
+  },
+  "graphic-link-advanced-style-helper": {
+    "name": "Graphic Link Advanced Style Helper",
+    "description": "Makes writing advanced styles for graphic links easier.",
+    "enabled-by-default": true,
+    "version-introduced": "1.2.4",
+    "help-text": "This tool will replace any selector for a Graphic Link in its advanced styles with the correct selector."
+  },
+  "graphic-link-autofill": {
+    "name": "Graphic Link Autofill",
+    "description": "Automatically set the URL for common graphic links.",
+    "enabled-by-default": true,
+    "version-introduced": "1.0.5",
+    "help-text": "This tool will look at the text entered in a Graphic Link when it is edited, then it will automatically set the link if a relevant link is known. You can turn this off in the edit screen so that if you need to override the automatic link you can."
+  },
+  "input-focus": {
+    "name": "Input Field Focuser",
+    "description": "Automatically focus the first input in a form when any admin pages load.",
+    "enabled-by-default": true,
+    "version-introduced": "1.2.4",
+    "help-text": "This tool will automatically focus the first input in a form when any admin pages load. No need to click into the first field!"
+  },
+  "keyboard-shortcuts": {
+    "name": "Keyboard Shortcuts",
+    "description": "Add keyboard shortcuts for various tasks.",
+    "enabled-by-default": true,
+    "version-introduced": "1.2.0",
+    "settings-link": {
+      "url": "/html/help.html#keyboard-shortcuts",
+      "text": "View Shortcut Keys"
+    },
+    "help-text": "This tool adds keyboard shortcuts for save, save and push, save and publish, and add new item. On Windows, the shortcuts are CTRL+S to save, CTRL+SHIFT+S to save and push/publish, and CTRL+I to add a new item. On macOS it is ⌘+S to save, ⌘+SHIFT+S to save and push/publish, and ⌘+I to add a new item."
+  },
+  "mavenlink-import-export": {
+    "name": "Mavenlink Import/Export Tools",
+    "description": "Adds tools for importing and exporting data from Mavenlink to the on-demand tools menu on Mavenlink.",
+    "enabled-by-default": false,
+    "version-introduced": "1.5.4",
+    "help-text": "Adds tools for importing and exporting data from Mavenlink to the on-demand tools menu on Mavenlink. These tools require elevated permissions in Mavenlink, so they are disabled by default. Only enable these tools if you know what you are doing."
+  },
+  "mavenlink-quick-add": {
+    "name": "Mavenlink Quick Add",
+    "description": "Quickly add yourself to projects or tasks.",
+    "enabled-by-default": true,
+    "version-introduced": "1.4.2",
+    "help-text": "This tool will add a button to Mavenlink to allow you to add yourself to a project or task without leaving the page."
+  },
+  "prevent-timeout": {
+    "name": "Prevent Session Timeout",
+    "description": "Automatically continue the current session when it is about to expire.",
+    "enabled-by-default": true,
+    "version-introduced": "1.0.0",
+    "help-text": "This tool automatically continues the current session when it is about to expire."
+  },
+  "quick-link-autofill": {
+    "name": "Quick Link Autofill",
+    "description": "Automatically set the URL for common quick links.",
+    "enabled-by-default": true,
+    "version-introduced": "1.0.4",
+    "help-text": "This tool will look at the text entered in a Quick Link when it is edited, then it will automatically set the link if a relevant link is known. You can turn this off in the edit screen so that if you need to override the automatic link you can."
+  },
+  "remember-image-picker-state": {
+    "name": "Remember Image Picker State",
+    "description": "Automatically opens the last-opened folder in the image picker modal.",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.5",
+    "help-text": "This tool automatically opens the last-opened folder in the image picker modal."
+  },
+  "show-changelog": {
+    "name": "Show Changelog",
+    "description": "Show a changelog and highlight new features when the plugin updates.",
+    "enabled-by-default": false,
+    "version-introduced": "1.1.0",
+    "settings-link": {
+      "url": "/html/changelog.html",
+      "text": "View changelog now"
+    },
+    "help-text": "When this extension updates, this option will show you a page with the changes introduced. The changelog describes new tools, bug fixes, and/or other relevant information."
+  },
+  "theme-manager-enhancer": {
+    "name": "Theme Manager enhancer",
+    "description": "Minor fixes and enhancements to Theme Manager",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.0",
+    "help-text": "This tool will add minor fixes and enhancements to Theme Manager, including changing the outline of the selected container in exploded view and unfixing the sticky strucutrual container in exploded view."
+  },
+  "title-changer": {
+    "name": "Title Changer",
+    "description": "Add the current page's title to the tab title.",
+    "enabled-by-default": true,
+    "version-introduced": "1.0.0",
+    "help-text": "This tool will add the current page's title to the tab title, so that if you have multiple tabs open on a site you can tell which is which."
+  },
+  "ultipro-learning-hours-helper": {
+    "name": "UltiPro Learning Hours Helper",
+    "description": "Quickly track learning hours by automatically opening the newly-participated event.",
+    "enabled-by-default": true,
+    "version-introduced": "1.13.0",
+    "help-text": "This tool makes tracking learning hours on UltiPro a bit easier."
+  },
+  "widget-skin-advanced-style-helper": {
+    "name": "Widget Skin Advanced Style Helper",
+    "description": "Makes writing advanced styles for widget skins easier.",
+    "enabled-by-default": true,
+    "version-introduced": "1.3.5",
+    "help-text": "This tool will replace any selector for a widget skin in its advanced styles with the correct selector."
+  },
+  "widget-skin-default-override": {
+    "name": "Widget Skin Default Override",
+    "description": "Changes the default widget skin settings.",
+    "enabled-by-default": true,
+    "version-introduced": "1.5.1",
+    "help-text": "This tool changes the default widget skin settings."
+  },
+  "xml-change-alerts": {
+    "name": "XML Major Change Alert",
+    "description": "Alerts you to changes that could cause data loss when uploading a new XML file.",
+    "enabled-by-default": true,
+    "version-introduced": "1.1.2",
+    "help-text": "This tool will alert you if any containers are missing on a new XML upload, which could cause any widgets, theme data, and other information associated with those containers to be lost."
+  }
+}

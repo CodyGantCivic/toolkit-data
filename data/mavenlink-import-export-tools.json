@@ -1,0 +1,20 @@
+{
+  "Export all tasks with estimated times from selected workspaces": {
+    "file": "export-tasks.js",
+    "urlPatterns": ["*://*.mavenlink.com/*"],
+    "help": "Export all tasks from selected workspaces, as a CSV file, to allow easier editing.",
+    "helpPages": "Mavenlink"
+  },
+  "Import estimated times for tasks": {
+    "file": "import-tasks.js",
+    "urlPatterns": ["*://*.mavenlink.com/*"],
+    "help": "Import tasks and their estimated time from a CSV file.",
+    "helpPages": "Mavenlink"
+  },
+  "Import Custom Field Values": {
+    "file": "import-custom-fields.js",
+    "urlPatterns": ["*://*.mavenlink.com/*"],
+    "help": "Import custom field values from a CSV file.",
+    "helpPages": "Mavenlink"
+  }
+}
