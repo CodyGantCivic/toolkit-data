@@ -2,13 +2,18 @@
  * DownloadXMLCSS.js
  *
  * Library-style script intended to be loaded dynamically (injected by a userscript).
- * Call `downloadxmlcss(options)` to execute. Exposes:
- *   - window.downloadxmlcss(options)
- *   - window.CPToolkit.downloadxmlcss(options)
+ * It preserves the original logic and UI placement from your userscript, but does NOT auto-run.
+ * Call `downloadxmlcss(options)` to execute.
  *
- * Notes:
- *  - This version waits for DOM readiness and inserts buttons next to existing action buttons.
- *  - It will not duplicate buttons on repeated runs.
+ * Exposes:
+ *   window.downloadxmlcss(options)
+ *   window.CPToolkit.downloadxmlcss(options)
+ *
+ * Options:
+ *   - autoConfirm: boolean (default false)
+ *
+ * Note: This version uses the same DOM selectors and logic you originally implemented,
+ *       but adapts GM_addStyle to plain style injection and is robust to SPA timing.
  */
 
 (function () {
@@ -18,7 +23,7 @@
   window.CPToolkit = window.CPToolkit || {};
   const TOOLKIT_NAME = '[CP Toolkit - Download XML/CSS]';
 
-  // Utility: basic pageMatches (keeps original behavior)
+  // Helper: check page matches
   function pageMatches(patterns) {
     const url = window.location.href.toLowerCase();
     const pathname = window.location.pathname.toLowerCase();
@@ -29,7 +34,7 @@
     });
   }
 
-  // Inject styles (replacement for GM_addStyle)
+  // Inject CSS (replacement for GM_addStyle)
   function injectStyle(css) {
     try {
       let s = document.getElementById('cp-toolkit-downloadxmlcss-style');
@@ -44,32 +49,12 @@
     }
   }
 
-  // Helper: download by triggering anchor click (relies on URL being absolute or resolvable)
-  function triggerDownloadFilename(filename, href) {
-    return new Promise((resolve) => {
-      try {
-        const a = document.createElement('a');
-        a.href = href;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        resolve({ ok: true, filename, url: href });
-      } catch (err) {
-        console.warn(TOOLKIT_NAME + ' triggerDownloadFilename failed', err);
-        resolve({ ok: false, filename, err });
-      }
-    });
-  }
-
-  // Helper: fetch text with timeout
+  // tiny fetch util
   async function fetchText(url, timeoutMs = 15000) {
     try {
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       let timer = null;
-      if (controller && timeoutMs) {
-        timer = setTimeout(() => controller.abort(), timeoutMs);
-      }
+      if (controller && timeoutMs) timer = setTimeout(() => controller.abort(), timeoutMs);
       const resp = await fetch(url, { signal: controller ? controller.signal : undefined, credentials: 'same-origin' });
       if (!resp.ok) {
         return { ok: false, status: resp.status, text: null };
@@ -82,7 +67,30 @@
     }
   }
 
-  // Wait for selector to appear (polling)
+  // trigger download by creating an anchor and clicking it
+  function triggerDownloadFilename(filename, href) {
+    return new Promise((resolve) => {
+      try {
+        // Resolve relative to current document
+        let finalHref = href;
+        try { finalHref = new URL(href, document.baseURI).href; } catch (e) { /* keep original */ }
+
+        const a = document.createElement('a');
+        a.href = finalHref;
+        a.download = filename;
+        // Append to DOM to ensure click works in some browsers
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        resolve({ ok: true, filename, url: finalHref });
+      } catch (err) {
+        console.warn(TOOLKIT_NAME + ' triggerDownloadFilename failed', err);
+        resolve({ ok: false, filename, err });
+      }
+    });
+  }
+
+  // Wait for a selector to appear (poll)
   function waitForSelector(selector, timeoutMs = 8000, intervalMs = 120) {
     return new Promise((resolve) => {
       const start = Date.now();
@@ -96,13 +104,13 @@
     });
   }
 
-  // Prefer jQuery if available (keeps original behavior)
+  // prefer jQuery when available
   function qAll(sel, ctx) {
     if (window.jQuery) return Array.from((ctx ? window.jQuery(ctx) : window.jQuery(document)).find(sel));
     return Array.from((ctx || document).querySelectorAll(sel));
   }
 
-  // Create a button element consistent with page buttons
+  // create a button consistent with page
   function makeActionButton(className, labelHtml, onClick) {
     const a = document.createElement('a');
     a.href = '#';
@@ -115,12 +123,11 @@
     return a;
   }
 
-  // Ensure FontAwesome (prefer shared loader)
+  // try to ensure fontawesome either via shared loader or injecting CDN link
   async function ensureFontAwesomeFallback() {
     if (typeof window.CPToolkit !== 'undefined' && typeof window.CPToolkit.ensureFontAwesome === 'function') {
       try { await window.CPToolkit.ensureFontAwesome(); return; } catch (e) { /* ignore */ }
     }
-    // basic fallback: inject CDN link if no FA found
     try {
       const already = document.querySelector('.fa, .fas, .far, .fal, .fab') || document.getElementById('cp-toolkit-fontawesome');
       if (!already) {
@@ -133,11 +140,11 @@
     } catch (e) { /* ignore */ }
   }
 
-  // Main exported function
+  // Main exported function - preserves original logic/behavior
   async function downloadxmlcss(options = {}) {
     const cfg = Object.assign({ autoConfirm: false }, options || {});
 
-    // Only run on Layouts page (same as original)
+    // Only run on Layouts page
     if (!pageMatches(['/admin/designcenter/layouts'])) {
       console.log(TOOLKIT_NAME + ' Not on Layouts page — exiting');
       return { ok: false, reason: 'not-layouts-page' };
@@ -158,10 +165,9 @@
 
     console.log(TOOLKIT_NAME + ' Initializing...');
 
-    // Ensure FA available
     await ensureFontAwesomeFallback();
 
-    // Inject CSS similar to original to position buttons next to other controls
+    // Add styling roughly equivalent to GM_addStyle in original
     injectStyle(`
       .downloadXML, .downloadCSS {
           line-height: 33px;
@@ -177,7 +183,6 @@
       .listing .item { padding-right: 330px; }
       .listing .item>.status { right: 330px; }
       .listing .item h3 { width: calc(100% - 54px); }
-      /* fallback if site layout different */
       .cp-download-wrapper { position: relative; }
       @media (max-width: 800px) {
         .downloadXML { right: 160px; }
@@ -185,15 +190,9 @@
       }
     `);
 
-    // Wait for listing items to appear (up to 8s) — original used .item
-    const listingSelector = '.listing .item, .item';
-    const listingRoot = await waitForSelector(listingSelector, 8000);
-    if (!listingRoot) {
-      console.warn(TOOLKIT_NAME + ' listing items not found — will still try to run once if items appear later.');
-      // Try to proceed by scanning immediately anyway
-    }
+    // Wait for listing items to appear up to 8s
+    await waitForSelector('.listing .item, .item', 8000);
 
-    // Query all items
     const itemEls = qAll('.listing .item, .item');
     if (!itemEls || itemEls.length === 0) {
       console.warn(TOOLKIT_NAME + ' No layout items found on page at this moment.');
@@ -202,46 +201,41 @@
 
     const currentSite = window.location.host.replace(/[:\/]/g, '-');
 
-    // Iterate and add buttons next to existing controls
+    // Insert buttons per-item
     for (const itemEl of itemEls) {
       try {
-        // Get the layout name from h3 > a
-        let titleAnchor = itemEl.querySelector && itemEl.querySelector('h3 a');
+        const titleAnchor = itemEl.querySelector && itemEl.querySelector('h3 a');
         const thisLayout = titleAnchor ? (titleAnchor.textContent || titleAnchor.innerText || '').trim() : null;
         if (!thisLayout) continue;
 
-        // Prevent duplicates
+        // avoid duplicates
         if (itemEl.querySelector('.downloadXML') || itemEl.querySelector('.downloadCSS')) continue;
 
-        // Find best insertion point: prefer .actions or .buttons inside this item
+        // choose insertion point
         let insertionContainer = itemEl.querySelector('.actions, .buttons, .item-actions, .item-buttons');
-        // if not found, try .status sibling area
         if (!insertionContainer) {
           const status = itemEl.querySelector('.status');
           if (status && status.parentNode) insertionContainer = status.parentNode;
         }
-        // fallback: make a positioned wrapper inside item
         if (!insertionContainer) {
-          // mark wrapper so CSS can position children relative to it
           if (!itemEl.classList.contains('cp-download-wrapper')) itemEl.classList.add('cp-download-wrapper');
           insertionContainer = itemEl;
         }
 
-        // Build XML button
+        // XML button
         const xmlBtn = makeActionButton('downloadXML', `<i class="fa fa-download" aria-hidden="true"></i> XML`, function () {
           const downloadUrl = `/App_Themes/${encodeURIComponent(thisLayout)}/${encodeURIComponent(thisLayout)}.xml`;
           const filename = `${currentSite}-${thisLayout}.xml`;
           triggerDownloadFilename(filename, downloadUrl);
         });
 
-        // Build CSS button; behavior mirrors original script
+        // CSS button
         const cssBtn = makeActionButton('downloadCSS', `<i class="fa fa-download" aria-hidden="true"></i> CSS`, function () {
-          // Find the layout page link inside the item
+          // find Layout Page link inside item
           let layoutPageHref = null;
           try {
             if (window.jQuery) {
-              const jq = window.jQuery(itemEl);
-              const lp = jq.find("a:contains('Layout Page')").first();
+              const lp = window.jQuery(itemEl).find("a:contains('Layout Page')").first();
               if (lp && lp.length) layoutPageHref = lp.attr('href');
             } else {
               const anchors = itemEl.querySelectorAll('a');
@@ -261,7 +255,6 @@
             return;
           }
 
-          // Use XHR to follow redirects similar to original (to get final URL) and then fetch content with bundle=off
           const xhr = new XMLHttpRequest();
           xhr.open('GET', layoutPageHref, true);
           xhr.onreadystatechange = function () {
@@ -290,28 +283,15 @@
           xhr.send();
         });
 
-        // Append buttons inside insertionContainer while preserving button order near existing controls
-        try {
-          // If insertionContainer is a node list wrapper from jQuery, convert to DOM node
-          if (window.jQuery && insertionContainer.jquery) insertionContainer = insertionContainer[0];
-
-          // Insert both buttons; place CSS then XML so layout matches expected spacing (XML further right)
-          insertionContainer.appendChild(cssBtn);
-          insertionContainer.appendChild(xmlBtn);
-        } catch (e) {
-          try {
-            insertionContainer.appendChild(cssBtn);
-            insertionContainer.appendChild(xmlBtn);
-          } catch (err) {
-            console.warn(TOOLKIT_NAME + ' failed to append buttons', err);
-          }
-        }
+        // append CSS then XML (matches previous spacing)
+        insertionContainer.appendChild(cssBtn);
+        insertionContainer.appendChild(xmlBtn);
       } catch (err) {
         console.warn(TOOLKIT_NAME + ' failed to process an item', err);
       }
-    } // end for each item
+    }
 
-    // Add "Download All" to sidebar if not present
+    // Add "Download All" in sidebar
     try {
       const sidebarButtons = document.querySelector('.contentContainer .sidebar .buttons') || document.querySelector('.sidebar .buttons');
       if (sidebarButtons && !sidebarButtons.querySelector('.cp-download-all')) {
@@ -339,13 +319,13 @@
     return { ok: true };
   }
 
-  // Export functions
+  // expose
   window.downloadxmlcss = window.downloadxmlcss || downloadxmlcss;
   window.CPToolkit = window.CPToolkit || {};
   window.CPToolkit.downloadxmlcss = window.CPToolkit.downloadxmlcss || downloadxmlcss;
   window.CPToolkit.pageMatches = pageMatches;
 
-  // End module
 })();
+
 
 
