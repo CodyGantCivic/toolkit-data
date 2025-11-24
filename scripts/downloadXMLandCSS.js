@@ -1,153 +1,418 @@
-// ==UserScript==
-// @name         CivicPlus - Download XML/CSS
-// @namespace    http://civicplus.com/
-// @version      1.0.0
-// @description  Adds download buttons for XML and CSS files on Layout pages
-// @author       CivicPlus
-// @match        *://*/*
-// @grant        GM_addStyle
-// @run-at       document-end
-// ==/UserScript==
+/**
+ * DownloadXMLCSS.js
+ *
+ * Library-style script intended to be loaded dynamically (injected by a userscript).
+ * It preserves the original per-layout UI insertion behavior AND the robust
+ * detection + download functionality.
+ *
+ * Exposes:
+ *   - window.downloadxmlcss(options)
+ *   - window.CPToolkit.downloadxmlcss(options)
+ *
+ * Options:
+ *   - autoConfirm: boolean (default false) — bypass confirmation when multiple files found
+ *   - types: ['css','xml'] — which types to detect/download
+ *   - timeoutMs: number — per-file fetch timeout
+ */
 
-(function() {
-    'use strict';
-    
-    const TOOLKIT_NAME = '[CP Toolkit - Download XML/CSS]';
-    
-    // Check if we're on the correct page
-    function pageMatches(patterns) {
-        const url = window.location.href.toLowerCase();
-        const pathname = window.location.pathname.toLowerCase();
-        
-        return patterns.some(pattern => {
-            const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i');
-            return regex.test(url) || regex.test(pathname);
+(function () {
+  'use strict';
+
+  // namespace
+  window.CPToolkit = window.CPToolkit || {};
+  const TOOLKIT_NAME = '[CP Toolkit - Download XML/CSS]';
+
+  /* ----------------- Utilities (download + fetch + detection) ----------------- */
+
+  function downloadTextAsFile(filename, text, mime = 'text/plain;charset=utf-8') {
+    return new Promise((resolve) => {
+      try {
+        const blob = new Blob([text], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        resolve({ ok: true, filename });
+      } catch (err) {
+        console.error(TOOLKIT_NAME + ' downloadTextAsFile failed', err);
+        resolve({ ok: false, filename, err });
+      }
+    });
+  }
+
+  async function fetchText(url, timeoutMs = 10000) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    let timer = null;
+    try {
+      if (controller && timeoutMs) timer = setTimeout(() => controller.abort(), timeoutMs);
+      const resp = await fetch(url, { signal: controller ? controller.signal : undefined, credentials: 'same-origin' });
+      const status = resp.status;
+      if (!resp.ok) {
+        return { ok: false, url, status, text: null, err: new Error('HTTP ' + status) };
+      }
+      const text = await resp.text();
+      return { ok: true, url, status, text };
+    } catch (err) {
+      return { ok: false, url, status: null, text: null, err };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function toAbsoluteUrl(href) {
+    try {
+      return new URL(href, document.baseURI).href;
+    } catch (e) {
+      return href;
+    }
+  }
+
+  function filenameFromUrl(url, fallbackPrefix = 'download') {
+    try {
+      const u = new URL(url);
+      const pathname = u.pathname;
+      const last = pathname.substring(pathname.lastIndexOf('/') + 1) || '';
+      if (last) return decodeURIComponent(last.split('?')[0]) || fallbackPrefix;
+      return (u.hostname || 'file') + '-' + Date.now();
+    } catch (err) {
+      const sanitized = url.replace(/[^a-z0-9\-_\.]/gi, '-').slice(0, 80);
+      return sanitized || (fallbackPrefix + '-' + Date.now());
+    }
+  }
+
+  function injectStyle(css, id = 'cp-toolkit-downloadxmlcss-style') {
+    try {
+      let s = document.getElementById(id);
+      if (!s) {
+        s = document.createElement('style');
+        s.id = id;
+        document.head.appendChild(s);
+      }
+      s.textContent = css;
+    } catch (e) {
+      console.warn(TOOLKIT_NAME + ' injectStyle failed', e);
+    }
+  }
+
+  /* ----------------- Detection logic (existing in your GitHub file) ----------------- */
+
+  function detectCssAndXmlUrls() {
+    const cssUrls = new Set();
+    const xmlUrls = new Set();
+
+    // 1) <link rel="stylesheet">
+    document.querySelectorAll('link[rel~="stylesheet"][href]').forEach((lnk) => {
+      const href = lnk.getAttribute('href');
+      if (!href) return;
+      const abs = toAbsoluteUrl(href);
+      if (abs.toLowerCase().endsWith('.css') || /\/assets\//i.test(abs)) cssUrls.add(abs);
+    });
+
+    // 2) <a href="*.css|*.xml">
+    document.querySelectorAll('a[href]').forEach((a) => {
+      const href = a.getAttribute('href');
+      if (!href) return;
+      const abs = toAbsoluteUrl(href);
+      if (abs.toLowerCase().endsWith('.xml')) xmlUrls.add(abs);
+      if (abs.toLowerCase().endsWith('.css')) cssUrls.add(abs);
+    });
+
+    // 3) data attributes / script tags referencing xml
+    document.querySelectorAll('[data-xml-src], [data-src], script[type="application/xml"]').forEach((el) => {
+      const src = el.getAttribute('data-xml-src') || el.getAttribute('data-src') || el.getAttribute('src') || el.textContent;
+      if (!src) return;
+      const abs = toAbsoluteUrl(src.trim());
+      if (abs.toLowerCase().endsWith('.xml')) xmlUrls.add(abs);
+    });
+
+    // 4) CivicPlus heuristic endpoints (candidates)
+    const candidates = [
+      '/assets/mystique/shared/components/moduletiles/templates/cp-Module-Tile.html',
+      '/Assets/Mystique/Shared/Components/ModuleTiles/Templates/cp-Module-Tile.html',
+      '/Services/Content/GetXml',
+      '/Config/SiteConfig.xml'
+    ];
+    candidates.forEach(c => {
+      const abs = toAbsoluteUrl(c);
+      if (/\.xml$/i.test(abs) || /template/i.test(abs) || /Service/i.test(abs)) xmlUrls.add(abs);
+    });
+
+    return { css: Array.from(cssUrls), xml: Array.from(xmlUrls) };
+  }
+
+  /* ----------------- Core downloader function (exported) ----------------- */
+
+  async function downloadxmlcss(options = {}) {
+    const cfg = Object.assign({ urls: null, types: ['css', 'xml'], autoConfirm: false, timeoutMs: 15000 }, options || {});
+    console.log(TOOLKIT_NAME + ' starting with options:', cfg);
+
+    let targets = [];
+    if (Array.isArray(cfg.urls) && cfg.urls.length > 0) {
+      targets = cfg.urls.map(toAbsoluteUrl);
+    } else {
+      const detected = detectCssAndXmlUrls();
+      if (cfg.types.includes('css') && Array.isArray(detected.css)) targets.push(...detected.css);
+      if (cfg.types.includes('xml') && Array.isArray(detected.xml)) targets.push(...detected.xml);
+      targets = Array.from(new Set(targets));
+    }
+
+    if (targets.length === 0) {
+      console.warn(TOOLKIT_NAME + ' no candidate URLs found to download.');
+      return { results: [], summary: { message: 'no-candidates' } };
+    }
+
+    if (!cfg.autoConfirm && targets.length > 1) {
+      const ok = confirm(`[DownloadXMLCSS] Found ${targets.length} files to download.\nProceed?`);
+      if (!ok) {
+        console.log(TOOLKIT_NAME + ' user cancelled downloads.');
+        return { results: [], summary: { message: 'user-cancelled' } };
+      }
+    }
+
+    const results = [];
+    for (const t of targets) {
+      try {
+        console.log(TOOLKIT_NAME + ' fetching', t);
+        const r = await fetchText(t, cfg.timeoutMs);
+        if (!r.ok) {
+          console.warn(TOOLKIT_NAME + ' fetch failed for', t, r.err || r.status);
+          results.push({ url: t, ok: false, status: r.status, err: r.err || new Error('fetch-failed') });
+          continue;
+        }
+        const lower = t.toLowerCase();
+        let mime = 'text/plain;charset=utf-8';
+        if (lower.endsWith('.css')) mime = 'text/css;charset=utf-8';
+        else if (lower.endsWith('.xml')) mime = 'application/xml;charset=utf-8';
+        else if (lower.endsWith('.html') || lower.endsWith('.htm')) mime = 'text/html;charset=utf-8';
+        const filename = filenameFromUrl(t);
+        const dl = await downloadTextAsFile(filename, r.text, mime);
+        results.push(Object.assign({ url: t, ok: dl.ok !== false, filename }, dl));
+      } catch (err) {
+        console.error(TOOLKIT_NAME + ' error processing', t, err);
+        results.push({ url: t, ok: false, err });
+      }
+    }
+
+    const okCount = results.filter(x => x.ok).length;
+    const failCount = results.length - okCount;
+    console.log(TOOLKIT_NAME + ` finished: ${okCount} succeeded, ${failCount} failed`);
+    return { results, summary: { total: results.length, succeeded: okCount, failed: failCount } };
+  }
+
+  /* ----------------- UI insertion: per-layout buttons and Download All (original behavior) ----------------- */
+
+  // helpers for UI insertion
+  function qAll(sel, ctx) {
+    if (window.jQuery) return Array.from((ctx ? window.jQuery(ctx) : window.jQuery(document)).find(sel));
+    return Array.from((ctx || document).querySelectorAll(sel));
+  }
+
+  function makeActionButton(className, labelHtml, onClick) {
+    const a = document.createElement('a');
+    a.href = '#';
+    a.className = `button ${className}`;
+    a.innerHTML = labelHtml;
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      try { onClick && onClick.call(this, e); } catch (err) { console.warn(TOOLKIT_NAME + ' button handler failed', err); }
+    });
+    return a;
+  }
+
+  async function ensureFontAwesomeFallback() {
+    if (typeof window.CPToolkit !== 'undefined' && typeof window.CPToolkit.ensureFontAwesome === 'function') {
+      try { await window.CPToolkit.ensureFontAwesome(); return; } catch (e) { /* ignore */ }
+    }
+    try {
+      const already = document.querySelector('.fa, .fas, .far, .fal, .fab') || document.getElementById('cp-toolkit-fontawesome');
+      if (!already) {
+        const link = document.createElement('link');
+        link.id = 'cp-toolkit-fontawesome';
+        link.rel = 'stylesheet';
+        link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css';
+        document.head.appendChild(link);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function waitForSelector(selector, timeoutMs = 8000, intervalMs = 120) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      function tick() {
+        const el = document.querySelector(selector);
+        if (el) return resolve(el);
+        if (Date.now() - start > timeoutMs) return resolve(null);
+        setTimeout(tick, intervalMs);
+      }
+      tick();
+    });
+  }
+
+  // Insert buttons next to layout items (mirrors your original userscript placement/behavior)
+  async function insertLayoutButtons() {
+    // Only on Layouts page
+    const url = window.location.href.toLowerCase();
+    if (!url.includes('/admin/designcenter/layouts')) return { ok: false, reason: 'not-layouts' };
+
+    await ensureFontAwesomeFallback();
+
+    // Add styles (approx original)
+    injectStyle(`
+      .downloadXML, .downloadCSS {
+          line-height: 33px;
+          font-size: .75rem;
+          font-weight: 400 !important;
+          position: absolute;
+          top: 4px;
+          z-index: 10;
+      }
+      .downloadXML { right: 221px; }
+      .downloadCSS { right: 120px; }
+      .downloadXML .fa, .downloadCSS .fa { color: #4f8ec0; }
+      .listing .item { padding-right: 330px; }
+      .listing .item>.status { right: 330px; }
+      .listing .item h3 { width: calc(100% - 54px); }
+      .cp-download-wrapper { position: relative; }
+      @media (max-width: 800px) {
+        .downloadXML { right: 160px; }
+        .downloadCSS { right: 60px; }
+      }
+    `);
+
+    await waitForSelector('.listing .item, .item', 8000);
+    const itemEls = qAll('.listing .item, .item');
+    if (!itemEls || itemEls.length === 0) return { ok: false, reason: 'no-items' };
+
+    const currentSite = window.location.host.replace(/[:\/]/g, '-');
+
+    for (const itemEl of itemEls) {
+      try {
+        const titleAnchor = itemEl.querySelector && itemEl.querySelector('h3 a');
+        const thisLayout = titleAnchor ? (titleAnchor.textContent || titleAnchor.innerText || '').trim() : null;
+        if (!thisLayout) continue;
+        if (itemEl.querySelector('.downloadXML') || itemEl.querySelector('.downloadCSS')) continue;
+
+        // find insertion container
+        let insertionContainer = itemEl.querySelector('.actions, .buttons, .item-actions, .item-buttons');
+        if (!insertionContainer) {
+          const status = itemEl.querySelector('.status');
+          if (status && status.parentNode) insertionContainer = status.parentNode;
+        }
+        if (!insertionContainer) {
+          if (!itemEl.classList.contains('cp-download-wrapper')) itemEl.classList.add('cp-download-wrapper');
+          insertionContainer = itemEl;
+        }
+
+        // XML button triggers direct download of /App_Themes/<layout>/<layout>.xml
+        const xmlBtn = makeActionButton('downloadXML', `<i class="fa fa-download" aria-hidden="true"></i> XML`, function () {
+          const downloadUrl = `/App_Themes/${encodeURIComponent(thisLayout)}/${encodeURIComponent(thisLayout)}.xml`;
+          const filename = `${currentSite}-${thisLayout}.xml`;
+          // call core download pipeline for this single URL
+          downloadxmlcss({ urls: [downloadUrl], types: ['xml'], autoConfirm: true, timeoutMs: 15000 })
+            .catch(err => console.warn(TOOLKIT_NAME + ' xmlBtn download error', err));
         });
-    }
-    
-    // Only run on Layouts page
-    if (!pageMatches(['/admin/designcenter/layouts'])) {
-        return;
-    }
-    
-    // Wait for CP site detection
-    async function init() {
-        if (typeof window.CPToolkit !== 'undefined' && typeof window.CPToolkit.isCivicPlusSite === 'function') {
-            const isCPSite = await window.CPToolkit.isCivicPlusSite();
-            if (!isCPSite) {
-                console.log(TOOLKIT_NAME + ' Not a CivicPlus site, exiting');
-                return;
-            }
-        }
-        
-        console.log(TOOLKIT_NAME + ' Initializing...');
-        
-        try {
-            // Use shared FontAwesome loader if available, otherwise use local fallback
-            if (typeof window.CPToolkit !== 'undefined' && typeof window.CPToolkit.ensureFontAwesome === 'function') {
-                await window.CPToolkit.ensureFontAwesome();
+
+        // CSS button: find "Layout Page" link, fetch it and parse CSS path then download
+        const cssBtn = makeActionButton('downloadCSS', `<i class="fa fa-download" aria-hidden="true"></i> CSS`, function () {
+          // find Layout Page link inside item
+          let layoutPageHref = null;
+          try {
+            if (window.jQuery) {
+              const lp = window.jQuery(itemEl).find("a:contains('Layout Page')").first();
+              if (lp && lp.length) layoutPageHref = lp.attr('href');
             } else {
-                // Fallback: Load FontAwesome directly
-                console.log(TOOLKIT_NAME + ' Loading FontAwesome (fallback mode)');
-                
-                await new Promise((resolve) => {
-                    // Check if FontAwesome is already loaded
-                    if ($('.fa, .fas, .far, .fal, .fab').length > 0 || $('#cp-toolkit-fontawesome').length > 0) {
-                        resolve();
-                        return;
-                    }
-                    
-                    // Load FontAwesome from CDN
-                    const link = document.createElement('link');
-                    link.id = 'cp-toolkit-fontawesome';
-                    link.rel = 'stylesheet';
-                    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css';
-                    link.onload = () => {
-                        console.log(TOOLKIT_NAME + ' FontAwesome loaded');
-                        resolve();
-                    };
-                    link.onerror = () => {
-                        console.warn(TOOLKIT_NAME + ' FontAwesome failed to load');
-                        resolve();
-                    };
-                    document.head.appendChild(link);
-                });
-            }
-            
-            GM_addStyle(`
-                .downloadXML, .downloadCSS {
-                    line-height: 33px;
-                    font-size: .75rem;
-                    font-weight: 400 !important;
-                    position: absolute;
-                    top: 4px;
+              const anchors = itemEl.querySelectorAll('a');
+              for (const a of anchors) {
+                if ((a.textContent || '').trim().toLowerCase().includes('layout page')) {
+                  layoutPageHref = a.getAttribute('href');
+                  break;
                 }
-                .downloadXML { right: 221px; }
-                .downloadCSS { right: 120px; }
-                .downloadXML .fa, .downloadCSS .fa { color: #4f8ec0; }
-                .listing .item { padding-right: 330px; }
-                .listing .item>.status { right: 330px; }
-                .listing .item h3 { width: calc(100% - 54px); }
-            `);
-            
-            const layouts = $(".item");
-            const currentSite = document.location.host;
-            
-            function downloadItem(title, url) {
-                const link = document.createElement("a");
-                link.download = title;
-                link.href = url;
-                link.click();
+              }
             }
-            
-            layouts.each(function() {
-                const $this = $(this);
-                const thisLayout = $this.find("h3 a").text();
-                
-                const downloadXML = $("<a href='#' class='button downloadXML'><i class='fa fa-download'></i> XML</a>");
-                downloadXML.click(function(e) {
-                    e.preventDefault();
-                    const downloadUrl = "/App_Themes/" + thisLayout + "/" + thisLayout + ".xml";
-                    downloadItem(currentSite + "-" + thisLayout + ".xml", downloadUrl);
+          } catch (e) { layoutPageHref = null; }
+
+          if (!layoutPageHref) {
+            console.warn(TOOLKIT_NAME + ' layout page link not found for', thisLayout);
+            return;
+          }
+
+          // fetch redirected layout page and then fetch it with bundle=off to find CSS path
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', layoutPageHref, true);
+          xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4) {
+              if (xhr.status === 200) {
+                const redirectedURL = xhr.responseURL || layoutPageHref;
+                fetchText(redirectedURL + '?bundle=off', 10000).then((r) => {
+                  if (r.ok && r.text) {
+                    const m = r.text.match(/\/App_Themes\/[^"'\s]*Layout[^"'\s]*/i);
+                    if (m && m[0]) {
+                      const cssUrl = m[0];
+                      const filename = `${currentSite}-${thisLayout}.css`;
+                      downloadxmlcss({ urls: [cssUrl], types: ['css'], autoConfirm: true, timeoutMs: 15000 })
+                        .catch(err => console.warn(TOOLKIT_NAME + ' cssBtn download error', err));
+                    } else {
+                      console.warn(TOOLKIT_NAME + ' CSS path not found in layout page for', thisLayout);
+                    }
+                  } else {
+                    console.warn(TOOLKIT_NAME + ' Failed to fetch layout page content for CSS detection', thisLayout, r.err || r.status);
+                  }
                 });
-                
-                const thisLayoutPage = $this.find("a:contains('Layout Page')").attr("href");
-                
-                const downloadCSS = $("<a href='#' class='button downloadCSS'><i class='fa fa-download'></i> CSS</a>");
-                downloadCSS.click(function(e) {
-                    e.preventDefault();
-                    const xhr = new XMLHttpRequest();
-                    xhr.onreadystatechange = function() {
-                        if (xhr.status === 200 && xhr.readyState === 4) {
-                            const redirectedURL = xhr.responseURL;
-                            $.get(redirectedURL + "?bundle=off", function(data) {
-                                const cssMatch = data.match(/\/App_Themes\/[^"]*Layout[^"]*/);
-                                if (cssMatch) {
-                                    downloadItem(currentSite + "-" + thisLayout + ".css", cssMatch[0]);
-                                }
-                            }, "text");
-                        }
-                    };
-                    xhr.open("GET", thisLayoutPage, true);
-                    xhr.send();
-                });
-                
-                $this.append(downloadXML, downloadCSS);
-            });
-            
-            const downloadAll = $("<li><a class='button bigButton nextAction' href='#'><span>Download All CSS and XML</span></a></li>");
-            downloadAll.click(function(e) {
-                e.preventDefault();
-                $(".downloadXML, .downloadCSS").each(function() { $(this).click(); });
-            });
-            
-            $(".contentContainer .sidebar .buttons").append(downloadAll);
-            
-            console.log(TOOLKIT_NAME + ' Successfully loaded');
-        } catch (err) {
-            console.warn(TOOLKIT_NAME + ' Error:', err);
-        }
+              } else {
+                console.warn(TOOLKIT_NAME + ' failed to load layout page', layoutPageHref, xhr.status);
+              }
+            }
+          };
+          xhr.send();
+        });
+
+        // append CSS then XML (keeps spacing similar to original)
+        insertionContainer.appendChild(cssBtn);
+        insertionContainer.appendChild(xmlBtn);
+      } catch (err) {
+        console.warn(TOOLKIT_NAME + ' failed to process an item', err);
+      }
     }
-    
-    init();
+
+    // Add "Download All" in the sidebar
+    try {
+      const sidebarButtons = document.querySelector('.contentContainer .sidebar .buttons') || document.querySelector('.sidebar .buttons');
+      if (sidebarButtons && !sidebarButtons.querySelector('.cp-download-all')) {
+        const li = document.createElement('li');
+        li.className = 'cp-download-all';
+        const a = document.createElement('a');
+        a.className = 'button bigButton nextAction';
+        a.href = '#';
+        a.innerHTML = '<span>Download All CSS and XML</span>';
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          const allButtons = document.querySelectorAll('.downloadXML, .downloadCSS');
+          for (const btn of allButtons) {
+            try { btn.click(); } catch (err) { /* ignore */ }
+          }
+        });
+        li.appendChild(a);
+        sidebarButtons.appendChild(li);
+      }
+    } catch (e) {
+      console.warn(TOOLKIT_NAME + ' failed to add Download All button', e);
+    }
+
+    return { ok: true };
+  }
+
+  /* ----------------- Exports ----------------- */
+
+  window.downloadxmlcss = window.downloadxmlcss || downloadxmlcss;
+  window.CPToolkit = window.CPToolkit || {};
+  window.CPToolkit.downloadxmlcss = window.CPToolkit.downloadxmlcss || downloadxmlcss;
+  window.CPToolkit.detectCssAndXmlUrls = detectCssAndXmlUrls;
+  window.CPToolkit.insertDownloadButtons = insertLayoutButtons;
+
+  // end module
 })();
+
