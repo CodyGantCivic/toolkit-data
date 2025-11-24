@@ -2,12 +2,13 @@
  * DownloadXMLCSS.js
  *
  * Library-style script intended to be loaded dynamically (injected by a userscript).
- * It preserves the original per-layout UI insertion behavior AND the robust
- * detection + download functionality.
+ * It preserves the original per-layout UI insertion behavior AND a robust
+ * detection + download pipeline.
  *
  * Exposes:
  *   - window.downloadxmlcss(options)
  *   - window.CPToolkit.downloadxmlcss(options)
+ *   - window.CPToolkit.insertDownloadButtons()
  *
  * Options:
  *   - autoConfirm: boolean (default false) — bypass confirmation when multiple files found
@@ -98,7 +99,7 @@
     }
   }
 
-  /* ----------------- Detection logic (existing in your GitHub file) ----------------- */
+  /* ----------------- Detection logic ----------------- */
 
   function detectCssAndXmlUrls() {
     const cssUrls = new Set();
@@ -205,7 +206,6 @@
 
   /* ----------------- UI insertion: per-layout buttons and Download All (original behavior) ----------------- */
 
-  // helpers for UI insertion
   function qAll(sel, ctx) {
     if (window.jQuery) return Array.from((ctx ? window.jQuery(ctx) : window.jQuery(document)).find(sel));
     return Array.from((ctx || document).querySelectorAll(sel));
@@ -252,15 +252,12 @@
     });
   }
 
-  // Insert buttons next to layout items (mirrors your original userscript placement/behavior)
   async function insertLayoutButtons() {
-    // Only on Layouts page
     const url = window.location.href.toLowerCase();
     if (!url.includes('/admin/designcenter/layouts')) return { ok: false, reason: 'not-layouts' };
 
     await ensureFontAwesomeFallback();
 
-    // Add styles (approx original)
     injectStyle(`
       .downloadXML, .downloadCSS {
           line-height: 33px;
@@ -296,7 +293,6 @@
         if (!thisLayout) continue;
         if (itemEl.querySelector('.downloadXML') || itemEl.querySelector('.downloadCSS')) continue;
 
-        // find insertion container
         let insertionContainer = itemEl.querySelector('.actions, .buttons, .item-actions, .item-buttons');
         if (!insertionContainer) {
           const status = itemEl.querySelector('.status');
@@ -307,18 +303,14 @@
           insertionContainer = itemEl;
         }
 
-        // XML button triggers direct download of /App_Themes/<layout>/<layout>.xml
         const xmlBtn = makeActionButton('downloadXML', `<i class="fa fa-download" aria-hidden="true"></i> XML`, function () {
           const downloadUrl = `/App_Themes/${encodeURIComponent(thisLayout)}/${encodeURIComponent(thisLayout)}.xml`;
           const filename = `${currentSite}-${thisLayout}.xml`;
-          // call core download pipeline for this single URL
           downloadxmlcss({ urls: [downloadUrl], types: ['xml'], autoConfirm: true, timeoutMs: 15000 })
             .catch(err => console.warn(TOOLKIT_NAME + ' xmlBtn download error', err));
         });
 
-        // CSS button: find "Layout Page" link, fetch it and parse CSS path then download
         const cssBtn = makeActionButton('downloadCSS', `<i class="fa fa-download" aria-hidden="true"></i> CSS`, function () {
-          // find Layout Page link inside item
           let layoutPageHref = null;
           try {
             if (window.jQuery) {
@@ -340,7 +332,6 @@
             return;
           }
 
-          // fetch redirected layout page and then fetch it with bundle=off to find CSS path
           const xhr = new XMLHttpRequest();
           xhr.open('GET', layoutPageHref, true);
           xhr.onreadystatechange = function () {
@@ -370,7 +361,6 @@
           xhr.send();
         });
 
-        // append CSS then XML (keeps spacing similar to original)
         insertionContainer.appendChild(cssBtn);
         insertionContainer.appendChild(xmlBtn);
       } catch (err) {
@@ -378,7 +368,6 @@
       }
     }
 
-    // Add "Download All" in the sidebar
     try {
       const sidebarButtons = document.querySelector('.contentContainer .sidebar .buttons') || document.querySelector('.sidebar .buttons');
       if (sidebarButtons && !sidebarButtons.querySelector('.cp-download-all')) {
@@ -410,8 +399,9 @@
   window.downloadxmlcss = window.downloadxmlcss || downloadxmlcss;
   window.CPToolkit = window.CPToolkit || {};
   window.CPToolkit.downloadxmlcss = window.CPToolkit.downloadxmlcss || downloadxmlcss;
+  window.CPToolkit.insertDownloadButtons = window.CPToolkit.insertDownloadButtons || insertLayoutButtons;
   window.CPToolkit.detectCssAndXmlUrls = detectCssAndXmlUrls;
-  window.CPToolkit.insertDownloadButtons = insertLayoutButtons;
 
   // end module
 })();
+
