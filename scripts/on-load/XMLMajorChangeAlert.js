@@ -1,66 +1,55 @@
 // XMLMajorChangeAlert.js
-// Patched to attach handlers reliably (delegated + MutationObserver + visibilitychange)
+// Aggressive init: runs immediately on CivicPlus + /Admin/DesignCenter/Layouts/Modify/
 // Exports: window.XMLMajorChangeAlert.init()
+// Idempotent, safe, SPA-friendly.
 
 (function () {
   'use strict';
 
-  var NAMESPACE = 'XMLMajorChangeAlert';
-  var GUARD = '__CP_' + NAMESPACE + '_LOADED_v2';
+  const NS = 'XMLMajorChangeAlert';
+  const GUARD = '__CP_' + NS + '_LOADED_v4';
 
   if (window[GUARD]) return;
-  window[NAMESPACE] = window[NAMESPACE] || { __loaded: false };
+  window[GUARD] = true;
 
-  function waitFor(conditionFn, timeoutMs, intervalMs) {
-    timeoutMs = typeof timeoutMs === 'number' ? timeoutMs : 5000;
-    intervalMs = typeof intervalMs === 'number' ? intervalMs : 100;
-    var start = Date.now();
-    return new Promise(function (resolve) {
+  window.XMLMajorChangeAlert = window.XMLMajorChangeAlert || { __loaded: false };
+
+  function safeLog() { try { /* silent by default */ } catch (e) {} }
+  function safeErr() { try { console.error.apply(console, arguments); } catch (e) {} }
+
+  function waitFor(test, timeout = 5000, interval = 80) {
+    const start = Date.now();
+    return new Promise(resolve => {
       (function check() {
         try {
-          if (conditionFn()) return resolve(true);
+          if (test()) return resolve(true);
         } catch (e) {}
-        if (Date.now() - start >= timeoutMs) return resolve(false);
-        setTimeout(check, intervalMs);
+        if (Date.now() - start >= timeout) return resolve(false);
+        setTimeout(check, interval);
       })();
     });
   }
 
-  function parseXmlToDoc(xmlString) {
-    try {
-      return new DOMParser().parseFromString(xmlString || '', 'text/xml');
-    } catch (e) {
-      return null;
-    }
+  function parseXml(xml) {
+    try { return new DOMParser().parseFromString(xml || '', 'text/xml'); } catch (e) { return null; }
+  }
+  function extractIds(xml) {
+    const doc = parseXml(xml);
+    if (!doc) return [];
+    return Array.from(doc.querySelectorAll('*')).map(n => {
+      try { return n.getAttribute && n.getAttribute('id'); } catch (e) { return null; }
+    }).filter(Boolean);
+  }
+  function findMalformed(xml) {
+    const doc = parseXml(xml);
+    if (!doc) return [];
+    return Array.from(doc.querySelectorAll('[cpRole="contentContainer"]'))
+      .filter(n => n.children && n.children.length)
+      .map(n => ({ id: n.getAttribute('id') || '(no id)', childIds: Array.from(n.children).map(c => c.id || '(no id)') }));
   }
 
-  function extractIdsFromXml(xmlString) {
-    try {
-      var doc = parseXmlToDoc(xmlString || '');
-      if (!doc) return [];
-      return Array.prototype.slice.call(doc.querySelectorAll('*')).map(function (n) {
-        try { return n.getAttribute && n.getAttribute('id'); } catch (e) { return null; }
-      }).filter(Boolean);
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function extractContentContainers(xmlString) {
-    try {
-      var doc = parseXmlToDoc(xmlString || '');
-      if (!doc) return [];
-      var nodes = Array.prototype.slice.call(doc.querySelectorAll('[cpRole="contentContainer"]'));
-      return nodes.map(function (n) {
-        try { return { id: n.getAttribute('id') || '', childCount: n.children ? n.children.length : 0, childIds: Array.prototype.slice.call(n.children).map(function(c){ return c.id || '(no id)'; }) }; }
-        catch (e) { return { id: '', childCount: 0, childIds: [] }; }
-      });
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function injectAlertContainerJQ($) {
+  // UI helpers
+  function ensureAlert($) {
     try {
       var $parent = $('#structureFile').parent();
       if ($parent && $parent.length) {
@@ -70,7 +59,7 @@
         return $('#toolkitAlert');
       }
     } catch (e) {}
-    // DOM fallback
+    // fallback
     try {
       var el = document.getElementById('toolkitAlert');
       if (!el) {
@@ -87,204 +76,198 @@
   }
 
   // Internal state
-  var originalXmlRaw = '';
-  var originalIds = [];
+  let originalXml = '';
+  let originalIds = [];
 
-  function computeOriginalFromDOM($) {
+  function refreshOriginal($) {
     try {
-      originalXmlRaw = ($('code').first().text() || '').trim();
-      originalIds = extractIdsFromXml(originalXmlRaw).sort();
+      originalXml = ($('code').first().text() || '').trim();
+      originalIds = extractIds(originalXml).sort();
     } catch (e) {
-      originalXmlRaw = '';
+      originalXml = '';
       originalIds = [];
     }
   }
 
-  function setupBindings($) {
+  function handleFileInput(el, $) {
     try {
-      // Recompute original whenever the code block changes (some SPAs re-render it)
-      // Use delegated mutation / polling fallback as needed
-      // Delegate change handler so it captures inputs added later
-      $(document).off('.XMLMajorChangeAlert', '#structureFile');
-      $(document).on('change.XMLMajorChangeAlert', '#structureFile', function () {
-        handleFileChange(this, $);
-      });
-
-      // Recompute originalXmlRaw now (useful if we navigated to the page late)
-      computeOriginalFromDOM($);
-
-      // If ErrorMessage appears later, show alerts
-      $(document).off('.XMLMajorChangeAlert', '#ErrorMessage');
-      $(document).on('DOMSubtreeModified.XMLMajorChangeAlert', '#ErrorMessage', function () {
-        try {
-          var t = $(this).text().trim();
-          if (t) alert(t);
-        } catch (e) {}
-      });
-
-      // Also observe the code block so originalXml updates if the page updates it
-      var codeEl = document.querySelector('code');
-      if (codeEl && window.MutationObserver) {
-        // disconnect existing observer if any
-        if (codeEl.__cp_xml_observer) codeEl.__cp_xml_observer.disconnect();
-        var mo = new MutationObserver(function () { computeOriginalFromDOM($); });
-        mo.observe(codeEl, { childList: true, subtree: true, characterData: true });
-        codeEl.__cp_xml_observer = mo;
-      }
-    } catch (e) {
-      console.error('[XMLMajorChangeAlert] setupBindings failed', e);
-    }
-  }
-
-  function handleFileChange(inputEl, $) {
-    try {
-      var file = inputEl && inputEl.files && inputEl.files[0];
+      const file = el && el.files && el.files[0];
       if (!file) {
-        try { $('#toolkitAlert').text(''); } catch (e) {}
+        try { $('#toolkitAlert').text(''); } catch (_) {}
         return;
       }
-
-      var reader = new FileReader();
+      const reader = new FileReader();
       reader.onload = function (ev) {
         try {
-          var data = ev && ev.target && ev.target.result ? ev.target.result : '';
-          var idx = data.indexOf('<?xml');
-          var newXml = idx >= 0 ? data.slice(idx) : data;
+          const raw = ev.target && ev.target.result ? ev.target.result : '';
+          const idx = raw.indexOf('<?xml');
+          const newXml = idx >= 0 ? raw.slice(idx) : raw;
+          const newIds = extractIds(newXml).sort();
+          const removed = originalIds.filter(id => !newIds.includes(id));
 
-          // Compute new IDs and compare
-          var newIds = extractIdsFromXml(newXml).sort();
-          var removed = originalIds.filter(function (id) { return newIds.indexOf(id) < 0; });
-
-          try {
-            var $alert = $('#toolkitAlert');
-            if (removed && removed.length) {
-              var diffText = removed.join(', ');
-              if ($alert && $alert.length) {
-                $alert.html('Warning: There are containers in the old XML that are not in the new XML. This will cause any widgets or styles applied to the following to be lost:<br><br>' + diffText).css('color', 'red');
-              } else {
-                // fallback: create alert container then set
-                var el = document.getElementById('toolkitAlert');
-                if (el) el.innerHTML = 'Warning: ' + diffText;
-              }
-              $('a.button.save').css('background-color', '#B33A3A').css('border-bottom-color', '#792327').css('color', '#fff');
-              $('a.button.save span').text('Save ignoring XML warning');
-            } else {
-              if ($alert && $alert.length) $alert.text('This XML has all the containers that the old XML had.').css('color', 'green');
-              $('a.button.save').css('background-color', '').css('border-bottom-color', '').css('color', '');
-              $('a.button.save span').text('Save');
+          const $alert = ensureAlert($);
+          if (removed.length) {
+            const diff = removed.join(', ');
+            if ($alert && $alert.length) {
+              $alert.html('Warning: The new XML is missing containers:<br><br>' + diff).css('color', 'red');
             }
-          } catch (uiErr) {
-            console.error('[XMLMajorChangeAlert] UI update failed', uiErr);
+            $('a.button.save').css({ backgroundColor: '#B33A3A', borderBottomColor: '#792327', color: '#fff' });
+            $('a.button.save span').text('Save ignoring XML warning');
+          } else {
+            if ($alert && $alert.length) $alert.text('This XML keeps all existing containers.').css('color', 'green');
+            $('a.button.save').css({ backgroundColor: '', borderBottomColor: '', color: '' });
+            $('a.button.save span').text('Save');
           }
 
-          // Validate for malformed content containers in new XML
-          try {
-            var newContainers = extractContentContainers(newXml);
-            (newContainers || []).forEach(function (c) {
-              try {
-                if (c && c.childCount && c.childCount > 0) {
-                  alert('The chosen XML is malformed:\n\n' + c.id + ' is a content container that contains additional elements. Content containers should not contain any elements. Please change this to a structural container or remove those elements.');
-                }
-              } catch (inner2) {}
-            });
-          } catch (validateErr) {
-            console.error('[XMLMajorChangeAlert] validation failed', validateErr);
-          }
+          // malformed new containers
+          const mal = findMalformed(newXml);
+          mal.forEach(m => {
+            try {
+              alert('The chosen XML is malformed:\n\n' + m.id + ' contains:\n\n' + m.childIds.join('\n') + '\n\nContent containers must not contain elements.');
+            } catch (err) {}
+          });
 
-        } catch (procErr) {
-          console.error('[XMLMajorChangeAlert] file processing error', procErr);
+        } catch (e) {
+          safeErr('[XMLMajorChangeAlert] file processing error', e);
         }
       };
       reader.readAsText(file);
     } catch (e) {
-      console.error('[XMLMajorChangeAlert] handleFileChange error', e);
+      safeErr('[XMLMajorChangeAlert] handleFileInput error', e);
     }
   }
 
-  function runSetup() {
-    // wait for jQuery + DOM readiness
-    waitFor(function () { return !!window.jQuery && document.readyState !== 'loading'; }, 6000, 100)
-      .then(function (hasJQ) {
-        if (!hasJQ) return;
-        var $ = window.jQuery;
+  function attachHandlers($) {
+    try {
+      if ($(document.body).data('__cp_xml_handlers')) return;
+      $(document.body).data('__cp_xml_handlers', true);
 
+      // delegated change handler - works if input is replaced later
+      $(document).on('change.XMLMajorChangeAlert', '#structureFile', function () { handleFileInput(this, window.jQuery); });
+
+      // show errors immediately
+      $(document).on('DOMSubtreeModified.XMLMajorChangeAlert', '#ErrorMessage', function () {
         try {
-          // compute current original state and bind handlers (delegated)
-          computeOriginalFromDOM($);
-          setupBindings($);
-
-          // best-effort DOM rearrangements (non-fatal)
-          try {
-            var $mainMenuBreakpoint = $('#mainMenuBreakpoint');
-            if ($mainMenuBreakpoint && $mainMenuBreakpoint.length) {
-              var $li = $mainMenuBreakpoint.parents('li.left').first();
-              if ($li && $li.length) $('ol.cpForm > li.left:nth-child(4)').after($li);
-            }
-            var $err = $('#ErrorMessage');
-            if ($err && $err.length) {
-              var $errLi = $err.parents('li.left').first();
-              if ($errLi && $errLi.length) $('ol.cpForm > li.left:nth-child(5)').after($errLi);
-            }
-          } catch (e) {}
-
-          // Add "View Layout Page" button (if present)
-          try {
-            var layoutName = ($('#txtStructureName').val() || '').toString();
-            if (layoutName) {
-              var pagesUrl = '/Pages/LayoutPage/?name=' + encodeURIComponent(layoutName);
-              var $pagesLink = $("<li><a class='button bigButton nextAction' href='" + pagesUrl + "' target='_blank'><span>View Layout Page</span></a></li>");
-              $('.buttons li a.save').parent("li").after($pagesLink);
-            }
-          } catch (e) {}
-
-          // ensure autorun hookup if SPA navigates away/back — re-run bindings on visibilitychange
-          if (!document.__cp_xml_visibility_listener) {
-            document.addEventListener('visibilitychange', function () {
-              if (document.visibilityState === 'visible') {
-                // recompute and re-bind (idempotent)
-                try {
-                  computeOriginalFromDOM(window.jQuery);
-                  setupBindings(window.jQuery);
-                } catch (e) {}
-              }
-            });
-            document.__cp_xml_visibility_listener = true;
-          }
-
-        } catch (outerErr) {
-          console.error('[XMLMajorChangeAlert] setup outer error', outerErr);
-        }
+          const t = $(this).text().trim();
+          if (t) alert(t);
+        } catch (_) {}
       });
+
+      refreshOriginal($);
+    } catch (e) {
+      safeErr('[XMLMajorChangeAlert] attachHandlers error', e);
+    }
   }
 
-  function init() {
-    if (window[GUARD]) return;
-    window[GUARD] = true;
-    window[NAMESPACE].__loaded = true;
-
-    // Only run on Layouts Modify page
+  function installMutationObserver($) {
     try {
-      var path = (window.location.pathname || '').toLowerCase();
-      if (path.indexOf('/admin/designcenter/layouts/modify') === -1) return;
+      const root = document.body || document.documentElement;
+      if (!root || root.__cp_xml_observer_installed) return;
+      const mo = new MutationObserver(function (mutations) {
+        try {
+          for (let m of mutations) {
+            if (m.addedNodes && m.addedNodes.length) {
+              for (let node of m.addedNodes) {
+                if (!node) continue;
+                if (node.id === 'structureFile' || (node.querySelector && node.querySelector('#structureFile'))) {
+                  refreshOriginal($);
+                  attachHandlers($);
+                  return;
+                }
+              }
+            }
+          }
+        } catch (e) {}
+      });
+      mo.observe(root, { childList: true, subtree: true });
+      root.__cp_xml_observer_installed = true;
+    } catch (e) {
+      safeErr('[XMLMajorChangeAlert] installMutationObserver error', e);
+    }
+  }
+
+  // A small aggressive fallback so the moment the element exists we attach (no refresh)
+  function rafAndIntervalFallback($) {
+    try {
+      let attempts = 0;
+      (function loop() {
+        try {
+          if (document.querySelector('#structureFile')) { refreshOriginal($); attachHandlers($); return; }
+        } catch (e) {}
+        attempts++;
+        if (attempts < 200) {
+          requestAnimationFrame(loop);
+        } else {
+          const id = setInterval(function () {
+            try {
+              if (document.querySelector('#structureFile')) { refreshOriginal($); attachHandlers($); clearInterval(id); }
+            } catch (e) {}
+          }, 200);
+        }
+      })();
+    } catch (e) {
+      safeErr('[XMLMajorChangeAlert] raf fallback error', e);
+    }
+  }
+
+  async function run() {
+    // Only run on the target path
+    try {
+      const path = (location.pathname || '').toLowerCase();
+      if (!path.includes('/admin/designcenter/layouts/modify')) return;
     } catch (e) { return; }
 
-    // If loader provides detection, use it but fall back if absent
-    (function () {
-      try {
-        if (window.CPToolkit && typeof window.CPToolkit.isCivicPlusSite === 'function') {
-          Promise.resolve(window.CPToolkit.isCivicPlusSite()).then(function (ok) {
-            if (ok) runSetup();
-          }).catch(function () { runSetup(); });
-        } else {
-          runSetup();
+    // If loader gives detection, use it; otherwise proceed.
+    try {
+      if (window.CPToolkit && typeof window.CPToolkit.isCivicPlusSite === 'function') {
+        try {
+          const ok = await window.CPToolkit.isCivicPlusSite();
+          if (!ok) return;
+          // minimal log from loader already prints "CivicPlus detected"
+        } catch (e) {
+          // fallthrough
         }
-      } catch (e) { runSetup(); }
-    })();
+      }
+    } catch (e) {}
+
+    // Wait for jQuery, but short timeout — we fallback aggressively
+    const ok = await waitFor(() => !!window.jQuery && document.readyState !== 'loading', 3000, 80);
+    if (!ok) {
+      // still attempt fallback: attach later when jQuery becomes available
+      (function pollJQ() {
+        const t = setInterval(function () {
+          if (window.jQuery) {
+            clearInterval(t);
+            try { attachHandlers(window.jQuery); } catch (e) { safeErr(e); }
+          }
+        }, 200);
+      })();
+    } else {
+      attachHandlers(window.jQuery);
+    }
+
+    // add mutation observer + fallback to ensure immediate attachment
+    try { installMutationObserver(window.jQuery || window.$); } catch (e) {}
+    try { rafAndIntervalFallback(window.jQuery || window.$); } catch (e) {}
+
+    // also re-run on visibility/focus (helps SPA)
+    if (!document.__cp_xml_visibility_hook) {
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+          try { refreshOriginal(window.jQuery || window.$); attachHandlers(window.jQuery || window.$); } catch (e) {}
+        }
+      });
+      window.addEventListener('focus', function () {
+        try { refreshOriginal(window.jQuery || window.$); attachHandlers(window.jQuery || window.$); } catch (e) {}
+      });
+      document.__cp_xml_visibility_hook = true;
+    }
   }
 
-  // expose + autorun
-  try { window.XMLMajorChangeAlert = window.XMLMajorChangeAlert || {}; window.XMLMajorChangeAlert.init = init; } catch (e) {}
-  try { init(); } catch (e) { console.error('[XMLMajorChangeAlert] autorun error', e); }
+  // Expose
+  window.XMLMajorChangeAlert.init = run;
+
+  // Auto-run (immediate)
+  try { run(); } catch (e) { safeErr('[XMLMajorChangeAlert] autorun error', e); }
 
 })();
-
