@@ -1,4 +1,4 @@
-/ Sanitized Module Icons helper for the CivicPlus Toolkit
+// Sanitized Module Icons helper for the CivicPlus Toolkit
 //
 // This script adds FontAwesome icons to favorite modules in the CivicPlus
 // admin interface. The original version relied on Chrome extension APIs
