@@ -36,7 +36,6 @@
                     return;
                 }
                 if (document.getElementById('cp-toolkit-fontawesome')) {
-                    // small delay to allow load to complete if in progress
                     setTimeout(resolve, 200);
                     return;
                 }
@@ -64,19 +63,16 @@
 
     // main function, idempotent
     async function insertDownloadButtons(options) {
-        // allow callers to pass options if needed later
         options = options || {};
 
         try {
-            // if already initialized, do nothing
             if (window.__cp_downloadxmlcss_initialized) {
                 console.info(TOOLKIT_NAME + ' already initialized');
                 return;
             }
 
-            // Only proceed when we have jQuery available; if not, wait a bit
+            // wait a bit for jQuery (site uses jQuery)
             if (typeof window.jQuery === 'undefined') {
-                // wait up to ~3 seconds for jQuery (site uses jQuery normally)
                 await new Promise((resolve) => {
                     let waited = 0;
                     const t = setInterval(() => {
@@ -94,7 +90,6 @@
             }
             const $ = window.jQuery;
 
-            // ensure Font Awesome
             await ensureFontAwesome();
 
             addStyles(`
@@ -112,7 +107,6 @@
                 .listing .item { padding-right: 330px; }
                 .listing .item>.status { right: 330px; }
                 .listing .item h3 { width: calc(100% - 54px); }
-                /* small responsive tweak if layout names are long */
                 .downloadXML, .downloadCSS { white-space: nowrap; overflow: visible; }
             `);
 
@@ -125,15 +119,12 @@
 
             function downloadItem(title, url) {
                 try {
-                    // Build anchor and click to prompt download
                     const a = document.createElement('a');
                     a.href = url;
                     a.download = title;
-                    // If the URL is relative, make absolute
                     if (!/^(https?:)?\/\//i.test(url)) {
                         a.href = window.location.origin.replace(/\/$/,'') + (url.startsWith('/') ? '' : '/') + url;
                     }
-                    // For same-origin blob or resource, click; otherwise open in new tab as fallback
                     try { a.click(); }
                     catch(e) { window.open(a.href, '_blank'); }
                 } catch (e) {
@@ -143,7 +134,6 @@
 
             layouts.each(function() {
                 const $this = $(this);
-                // don't add twice
                 if ($this.data('cp-dl-added')) return;
                 $this.data('cp-dl-added', true);
 
@@ -157,7 +147,6 @@
                     downloadItem(currentSite + "-" + thisLayout + ".xml", downloadUrl);
                 });
 
-                // find layout page link (the "View Layout Page" anchor)
                 const thisLayoutPage = $this.find("a:contains('Layout Page'), a:contains('View Layout Page')").attr("href") || $this.find("h3 a").attr("href");
 
                 const downloadCSS = $("<a href='#' class='button downloadCSS'><i class='fa fa-download'></i><span>CSS</span></a>");
@@ -172,7 +161,6 @@
                         if (xhr.readyState === 4) {
                             if (xhr.status === 200) {
                                 const redirectedURL = xhr.responseURL;
-                                // fetch layout page with bundle off to find actual theme CSS path
                                 window.jQuery.get(redirectedURL + "?bundle=off", function(data) {
                                     const cssMatch = data.match(/\/App_Themes\/[^"]*Layout[^"]*/);
                                     if (cssMatch) {
@@ -199,7 +187,6 @@
                 $this.append(downloadXML, downloadCSS);
             });
 
-            // Add a "Download All" button to the sidebar if not already present
             const $sidebarButtons = $(".contentContainer .sidebar .buttons");
             if ($sidebarButtons.length) {
                 if ($sidebarButtons.find('.cp-download-all').length === 0) {
@@ -223,13 +210,12 @@
     global.insertDownloadButtons = insertDownloadButtons;
     global.downloadxmlcss = insertDownloadButtons;
 
-    // Auto-run path detection: only run when on Layouts page and (best-effort) CivicPlus site
+    // Auto-run path detection: only run when on Layouts page and CivicPlus
     (async function autoRun() {
         try {
             if (!pageMatches(['/admin/designcenter/layouts'])) return;
             const isCP = await isCivicPlusSite();
             if (!isCP) return;
-            // slight delay to allow page DOM to settle
             setTimeout(() => {
                 try { insertDownloadButtons(); }
                 catch (e) { console.warn(TOOLKIT_NAME + ' autoRun failed', e); }
