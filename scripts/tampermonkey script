@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CP Toolkit - Remote Loader (with OnLoad Scripts Manager)
 // @namespace    http://civicplus.com/
-// @version      1.4.10
+// @version      1.4.11
 // @description  Loader for CivicPlus admin helpers (minimal logging). Injects on-load helpers immediately and supports SPA navigation.
 // @match        *://*/*
 // @grant        none
@@ -16,13 +16,24 @@
 
   // ======= Script registry: add your helpers here =======
   const scriptRegistry = [
-    { id: 'download_xml_css', name: 'Download XML/CSS', url: '/mnt/data/DownloadXMLCSS.js', pages: ['/admin/designcenter/layouts'] },
+    { id: 'download_xml_css', name: 'Download XML/CSS', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/DownloadXMLCSS.js', pages: ['/admin/designcenter/layouts'] },
     { id: 'advanced_styles', name: 'Advanced Styles Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AdvancedStylesHelper.js', pages: ['/designcenter/themes*','/designcenter/widgets*'] },
     { id: 'widget_skin', name: 'Widget Skin Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/widgetSkinHelper.js', pages: ['/designcenter/themes*'] },
     { id: 'graphic_link_helper', name: 'Graphic Link Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/GraphicLinkHelper.js', pages: ['/admin/graphiclinks*'] },
     { id: 'xml_major_change_alert', name: 'XML Major Change Alert', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/XMLMajorChangeAlert.js', pages: ['/admin/designcenter/layouts/modify*'] },
-    // New: AllowOpenInNewTab (local upload path)
-    { id: 'allow_open_in_new_tab', name: 'Allow Open In New Tab', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AllowOpenInNewTab.js', pages: ['/admin*'] }
+    { id: 'allow_open_in_new_tab', name: 'Allow Open In New Tab', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AllowOpenInNewTab.js', pages: ['/admin*'] },
+    { id: 'prevent_session_timeout', name: 'Prevent Session Timeout', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/PreventSessionTimeout.js', pages: ['/admin*','/designcenter*'] }
+    ,
+    // Enhances the Design Center pages (Themes, Widgets, Animations) with improved UI and
+    // dropdown functionality. Loads only on those pages.
+    { id: 'theme_manager_enhancer', name: 'Theme Manager Enhancer', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/ThemeManagerEnhancer.js', pages: ['/designcenter/themes*','/designcenter/widgets*','/designcenter/animations*'] }
+    ,
+    // Module icons helper: adds FontAwesome icons to favorite modules
+    // in the CivicPlus admin interface. This helper fetches definitions
+    // from `modules.json` and injects icons for modules marked as
+    // default favorites. It runs on all admin pages because the
+    // module list can appear in various admin sections.
+    { id: 'module_icons', name: 'Module Icons', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/moduleIcons.js', pages: ['/admin*'] }
   ];
   // ======================================================
 
@@ -74,18 +85,53 @@
     root.id = 'cptoolkit-manager-root';
     root.innerHTML = `
       <style>
-        #cptoolkit-fab { position: fixed; right: -44px; top: 50%; transform: translateY(-50%); width: 44px; height: 120px; border-radius: 8px 0 0 8px; background: linear-gradient(180deg,#0b5fff,#0846d1); color: white; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index: 2147483000; box-shadow: 0 6px 18px rgba(11,95,255,0.25); user-select: none; transition: right 240ms cubic-bezier(.2,.9,.2,1), opacity 160ms; opacity: 0.95; }
-        #cptoolkit-fab .tab { position: absolute; left: -18px; width: 18px; height: 44px; top: calc(50% - 22px); border-radius: 6px 0 0 6px; background: rgba(255,255,255,0.08); }
-        #cptoolkit-fab .label { writing-mode: vertical-rl; transform: rotate(180deg); font-weight:700; letter-spacing:0.6px; font-size:12px; }
-        #cptoolkit-modal { display: none; position: fixed; right: 20px; bottom: 80px; width: 420px; max-height: 70vh; overflow: auto; background: #fff; border-radius: 10px; box-shadow: 0 12px 30px rgba(4,12,20,0.3); z-index: 2147483001; padding: 12px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+        #cptoolkit-fab {
+          position: fixed;
+          right: -60px;
+          top: 20px;
+          /* Position at top right instead of centered vertically */
+          transform: none;
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          background: url('https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/images/civicplus-circle.jpg') no-repeat center/cover;
+          background-size: cover;
+          box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+          cursor: pointer;
+          z-index: 2147483000;
+          transition: right 240ms cubic-bezier(.2,.9,.2,1), opacity 160ms;
+          opacity: 0.95;
+          user-select: none;
+        }
+        #cptoolkit-fab .tab,
+        #cptoolkit-fab .label {
+          display: none;
+        }
+        #cptoolkit-modal {
+          display: none;
+          position: fixed;
+          right: 20px;
+          /* Position the modal directly beneath the icon */
+          top: 80px;
+          width: 420px;
+          max-height: 70vh;
+          overflow: auto;
+          background: #fff;
+          border-radius: 10px;
+          box-shadow: 0 12px 30px rgba(4,12,20,0.3);
+          z-index: 2147483001;
+          padding: 12px;
+          font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+        }
         #cptoolkit-modal h3 { margin:0 0 8px 0; font-size:14px;}
         .cptoolkit-entry { display:flex; align-items:center; justify-content:space-between; padding:8px 6px; border-bottom: 1px solid #eef2ff;}
         .cptoolkit-entry .left { display:flex; gap:8px; align-items:center; }
         .cptoolkit-entry .meta { font-size:12px; color:#444; }
         .cptoolkit-controls { display:flex; gap:6px; margin-top:8px; }
         .cptoolkit-btn { padding:6px 10px; border-radius:6px; cursor:pointer; background:#f3f4f6; border:1px solid #e5e7eb; font-size:13px; }
-        .cptoolkit-btn.primary { background:#0b5fff; color:#fff; border-color:transparent; }
-        .cptoolkit-link { font-size:12px; color:#0b5fff; text-decoration: none; margin-left:6px; }
+        /* Use CivicPlus red accent color instead of blue */
+        .cptoolkit-btn.primary { background:#CC0020; color:#fff; border-color:transparent; }
+        .cptoolkit-link { font-size:12px; color:#CC0020; text-decoration: none; margin-left:6px; }
       </style>
 
       <div id="cptoolkit-fab" title="CP Toolkit" tabindex="0" role="button" aria-label="Open CP Toolkit">
@@ -99,9 +145,6 @@
         <div class="cptoolkit-controls">
           <button id="cptoolkit-enable-all" class="cptoolkit-btn">Enable all</button>
           <button id="cptoolkit-disable-all" class="cptoolkit-btn">Disable all</button>
-          <div style="flex:1"></div>
-          <button id="cptoolkit-save" class="cptoolkit-btn primary">Save</button>
-          <button id="cptoolkit-close" class="cptoolkit-btn">Close</button>
         </div>
       </div>
     `;
@@ -118,9 +161,18 @@
         const entry = document.createElement('div');
         entry.className = 'cptoolkit-entry';
         const left = document.createElement('div'); left.className = 'left';
-        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'cptoolkit-cb-' + s.id; cb.checked = !!map[s.id];
-        cb.addEventListener('change', () => { map[s.id] = cb.checked; });
-        const title = document.createElement('div'); title.innerHTML = `<div><strong>${s.name}</strong></div><div class="meta">${s.pages.join(', ')}</div>`;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = 'cptoolkit-cb-' + s.id;
+        cb.checked = !!map[s.id];
+        // Persist changes immediately when toggled; no need for a separate save button
+        cb.addEventListener('change', () => {
+          map[s.id] = cb.checked;
+          writeEnabledMap(map);
+        });
+        const title = document.createElement('div');
+        // Avoid backtick template literals to prevent truncation in embedding; use string concatenation
+        title.innerHTML = '<div><strong>' + s.name + '</strong></div><div class="meta">' + s.pages.join(', ') + '</div>';
         left.appendChild(cb); left.appendChild(title);
         const right = document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; right.style.gap='6px';
         const openLink = document.createElement('a'); openLink.href = s.url; openLink.target = '_blank'; openLink.className = 'cptoolkit-link'; openLink.textContent = 'Open';
@@ -132,23 +184,96 @@
 
     let visible = false, hideTimer = null;
     function show() { if (visible) return; visible = true; fab.style.right = '8px'; }
-    function hide() { if (!visible) return; visible = false; fab.style.right = '-44px'; }
+    function hide() {
+      if (!visible) return;
+      visible = false;
+      // Match the offset used in the CSS definition (right: -60px)
+      fab.style.right = '-60px';
+    }
     document.addEventListener('mousemove', function (e) {
-      const cx = window.innerWidth, cy = window.innerHeight/2, dx = cx - e.clientX, dy = Math.abs(e.clientY - cy);
-      if (dx <= 24 && dy <= 120) { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } show(); return; }
-      const rect = fab.getBoundingClientRect(); const over = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
-      if (over) { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } show(); return; }
+      // Detect proximity: near the right edge and near the top (within 120px)
+      const dx = window.innerWidth - e.clientX;
+      const nearRight = dx <= 24;
+      const nearTop = e.clientY <= 120;
+      if (nearRight && nearTop) {
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        show();
+        return;
+      }
+      const rect = fab.getBoundingClientRect();
+      const over = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      if (over) {
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        show();
+        return;
+      }
       if (visible && !hideTimer) hideTimer = setTimeout(hide, 700);
     }, { passive: true });
 
-    fab.addEventListener('click', () => { modal.style.display = modal.style.display === 'block' ? 'none' : 'block'; if (modal.style.display === 'block') show(); });
-    document.getElementById('cptoolkit-enable-all').addEventListener('click', () => { scriptRegistry.forEach(s => map[s.id] = true); renderList(); });
-    document.getElementById('cptoolkit-disable-all').addEventListener('click', () => { scriptRegistry.forEach(s => map[s.id] = false); renderList(); });
-    document.getElementById('cptoolkit-save').addEventListener('click', function () { writeEnabledMap(map); const old = this.textContent; this.textContent = 'Saved'; setTimeout(()=>this.textContent = old,900); });
+    // Show the modal on hover (mouseenter) instead of click
+    fab.addEventListener('mouseenter', () => {
+      modal.style.display = 'block';
+      show();
+    });
+    // Hide the modal when leaving the icon unless the pointer is over the modal
+    fab.addEventListener('mouseleave', () => {
+      setTimeout(() => {
+        if (!modal.matches(':hover')) {
+          modal.style.display = 'none';
+          hide();
+        }
+      }, 300);
+    });
+    document.getElementById('cptoolkit-enable-all').addEventListener('click', () => {
+      scriptRegistry.forEach(s => map[s.id] = true);
+      renderList();
+    });
+    document.getElementById('cptoolkit-disable-all').addEventListener('click', () => {
+      scriptRegistry.forEach(s => map[s.id] = false);
+      renderList();
+    });
+
+    // Manage delayed closing of the modal. When the user moves the mouse off the
+    // modal, start a 5‑second timer. If the mouse re‑enters before the timer
+    // expires, cancel the timer so the modal stays open. This allows the UI
+    // to remain visible for a short time after hovering away, per user request.
+    let uiCloseTimer = null;
+    modal.addEventListener('mouseleave', () => {
+      // If a timer is already running, clear it first
+      if (uiCloseTimer) {
+        clearTimeout(uiCloseTimer);
+      }
+      uiCloseTimer = setTimeout(() => {
+        modal.style.display = 'none';
+        hide();
+        uiCloseTimer = null;
+      }, 5000);
+    });
+    modal.addEventListener('mouseenter', () => {
+      if (uiCloseTimer) {
+        clearTimeout(uiCloseTimer);
+        uiCloseTimer = null;
+      }
+    });
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', createManagerUI);
-  else setTimeout(createManagerUI, 0);
+  // Only show the manager UI on CivicPlus sites. Wrap UI creation in a helper.
+  async function maybeCreateManagerUI() {
+    try {
+      const isCP = await isCivicPlusSite();
+      if (isCP) {
+        createManagerUI();
+      }
+    } catch (e) {
+      // ignore detection errors and don't show the UI
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', maybeCreateManagerUI);
+  } else {
+    setTimeout(maybeCreateManagerUI, 0);
+  }
 
   // CivicPlus detection
   async function isCivicPlusSite() {
