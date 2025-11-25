@@ -1,0 +1,60 @@
+{
+  "name": "toolkit-data",
+  "version": "1.0.0",
+  "source_of_truth": "specs/CivicPlus_Toolkit_Upgraded_Master_Specification.pdf",
+  "files": {
+    "css": [
+      "changelog.css",
+      "fancybutton.css",
+      "fancyButtonStyles.css",
+      "global.css",
+      "help.css",
+      "main.css",
+      "options.css"
+    ],
+    "css/external": [
+      "bootstrap.min.css",
+      "fontawesome-all.min.css"
+    ],
+    "css/external/fontawesome-fonts": [
+      "fa-brands-400.eot",
+      "fa-brands-400.svg",
+      "fa-brands-400.ttf",
+      "fa-brands-400.woff",
+      "fa-brands-400.woff2",
+      "fa-regular-400.eot",
+      "fa-regular-400.svg",
+      "fa-regular-400.ttf",
+      "fa-regular-400.woff",
+      "fa-regular-400.woff2",
+      "fa-solid-900.eot",
+      "fa-solid-900.svg",
+      "fa-solid-900.ttf",
+      "fa-solid-900.woff",
+      "fa-solid-900.woff2",
+      "FontAwesome.otf"
+    ],
+    "data": [
+      "fancy-button-library.json",
+      "first",
+      "link-replacement-text.json",
+      "mavenlink-import-export-tools.json",
+      "modules.json",
+      "on-demand-tools.json",
+      "on-load-tools.json"
+    ],
+    "scripts": [
+      "tampermonkey script"
+    ],
+    "scripts/on-load": [
+      "AdvancedStylesHelper.js",
+      "AllowOpenInNewTab.js",
+      "DownloadXMLCSS.js",
+      "GraphicLinkHelper.js",
+      "PreventSessionTimeout.js",
+      "ThemeManagerEnhancer.js",
+      "widgetSkinHelper.js",
+      "XMLMajorChangeAlert.js"
+    ]
+  }
+}
