@@ -1,228 +1,154 @@
 // DownloadXMLCSS.js
-// CivicPlus - Download XML/CSS (remote, injector-friendly)
-// Exposes window.insertDownloadButtons() and window.downloadxmlcss()
-// Auto-runs when on /admin/designcenter/layouts and on a CivicPlus site.
+// Version: 1.0.0
+// Exports: window.DownloadXMLCSS.init()
+// Purpose: Add download XML / CSS button UI on Layouts listing page.
+// Idempotent, waits for jQuery/DOM, page-safe.
 
-(function(global) {
-    'use strict';
+(function () {
+  'use strict';
 
-    const TOOLKIT_NAME = '[CP Toolkit - Download XML/CSS]';
+  var NAME = 'DownloadXMLCSS';
+  var GUARD = '__CP_' + NAME + '_LOADED_v1';
 
-    function pageMatches(patterns) {
-        const url = window.location.href.toLowerCase();
-        const pathname = window.location.pathname.toLowerCase();
-        return patterns.some(pattern => {
-            const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i');
-            return regex.test(url) || regex.test(pathname);
-        });
-    }
+  if (window[GUARD]) return;
+  window.DownloadXMLCSS = window.DownloadXMLCSS || { __loaded: false };
 
-    // Lightweight CivicPlus site detection (same logic as toolkit)
-    async function isCivicPlusSite() {
+  function waitFor(fn, timeout, interval) {
+    timeout = typeof timeout === 'number' ? timeout : 5000;
+    interval = typeof interval === 'number' ? interval : 100;
+    var start = Date.now();
+    return new Promise(function (resolve) {
+      (function check() {
         try {
-            const resp = await fetch('/Assets/Mystique/Shared/Components/ModuleTiles/Templates/cp-Module-Tile.html', { method: 'HEAD' });
-            return resp && resp.status === 200;
-        } catch (e) {
-            return false;
-        }
-    }
-
-    // Ensure Font Awesome loaded (best-effort)
-    function ensureFontAwesome() {
-        return new Promise((resolve) => {
-            try {
-                if (document.querySelector('.fa, .fas, .far, .fal, .fab')) {
-                    resolve();
-                    return;
-                }
-                if (document.getElementById('cp-toolkit-fontawesome')) {
-                    setTimeout(resolve, 200);
-                    return;
-                }
-                const link = document.createElement('link');
-                link.id = 'cp-toolkit-fontawesome';
-                link.rel = 'stylesheet';
-                link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css';
-                link.onload = () => resolve();
-                link.onerror = () => resolve();
-                document.head.appendChild(link);
-            } catch (e) { resolve(); }
-        });
-    }
-
-    // Add CSS into page (safe for injection)
-    function addStyles(cssText) {
-        try {
-            if (document.getElementById('cp-toolkit-downloadxmlcss-styles')) return;
-            const s = document.createElement('style');
-            s.id = 'cp-toolkit-downloadxmlcss-styles';
-            s.textContent = cssText;
-            (document.head || document.documentElement).appendChild(s);
+          if (fn()) return resolve(true);
         } catch (e) { /* ignore */ }
+        if (Date.now() - start >= timeout) return resolve(false);
+        setTimeout(check, interval);
+      })();
+    });
+  }
+
+  function createButton($container) {
+    try {
+      if (!$container || !$container.length) return null;
+      // avoid duplicate
+      if ($container.find('.cp-download-xml-css').length) return $container.find('.cp-download-xml-css');
+
+      var $btn = $('<a class="button cp-download-xml-css" href="#" title="Download XML and CSS"><span>Download XML / CSS</span></a>');
+      $btn.css({ marginLeft: '8px' });
+      $container.append($btn);
+      return $btn;
+    } catch (e) {
+      console.error('[DownloadXMLCSS] createButton error', e);
+      return null;
+    }
+  }
+
+  function downloadTextAsFile(filename, text) {
+    try {
+      var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+        // IE fallback
+        window.navigator.msSaveOrOpenBlob(blob, filename);
+        return;
+      }
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        URL.revokeObjectURL(url);
+        try { document.body.removeChild(a); } catch (e) { /* ignore */ }
+      }, 150);
+    } catch (e) {
+      console.error('[DownloadXMLCSS] download error', e);
+    }
+  }
+
+  async function init() {
+    if (window[GUARD]) return;
+    window[GUARD] = true;
+    window.DownloadXMLCSS.__loaded = true;
+
+    // quick page check: only run on layouts index page
+    try {
+      var path = (window.location.pathname || '').toLowerCase();
+      if (path !== '/admin/designcenter/layouts' && path !== '/admin/designcenter/layouts/') {
+        return;
+      }
+    } catch (e) {
+      return;
     }
 
-    // main function, idempotent
-    async function insertDownloadButtons(options) {
-        options = options || {};
+    var ok = await waitFor(function () { return !!window.jQuery && document.readyState !== 'loading'; }, 6000, 100);
+    if (!ok) return;
+    var $ = window.jQuery;
 
+    try {
+      // attach into any header / action toolbar present
+      $(function () {
         try {
-            if (window.__cp_downloadxmlcss_initialized) {
-                console.info(TOOLKIT_NAME + ' already initialized');
-                return;
-            }
+          // find a sensible container for action buttons
+          var $toolbar = $('.buttons, .actions, .page-actions').first();
+          if (!$toolbar || !$toolbar.length) {
+            // fallback: header area
+            $toolbar = $('h1, .page-header').first();
+          }
+          var $btn = createButton($toolbar);
+          if (!$btn || !$btn.length) return;
 
-            // wait a bit for jQuery (site uses jQuery)
-            if (typeof window.jQuery === 'undefined') {
-                await new Promise((resolve) => {
-                    let waited = 0;
-                    const t = setInterval(() => {
-                        if (typeof window.jQuery !== 'undefined' || waited > 3000) {
-                            clearInterval(t);
-                            resolve();
-                        }
-                        waited += 200;
-                    }, 200);
-                });
-            }
-            if (typeof window.jQuery === 'undefined') {
-                console.warn(TOOLKIT_NAME + ' jQuery not found; aborting button insertion.');
-                return;
-            }
-            const $ = window.jQuery;
-
-            await ensureFontAwesome();
-
-            addStyles(`
-                .downloadXML, .downloadCSS {
-                    line-height: 33px;
-                    font-size: .75rem;
-                    font-weight: 400 !important;
-                    position: absolute;
-                    top: 4px;
-                    z-index: 5;
-                }
-                .downloadXML { right: 221px; }
-                .downloadCSS { right: 120px; }
-                .downloadXML .fa, .downloadCSS .fa { color: #4f8ec0; margin-right:6px; }
-                .listing .item { padding-right: 330px; }
-                .listing .item>.status { right: 330px; }
-                .listing .item h3 { width: calc(100% - 54px); }
-                .downloadXML, .downloadCSS { white-space: nowrap; overflow: visible; }
-            `);
-
-            const layouts = $(".listing .items .item");
-            if (!layouts || layouts.length === 0) {
-                console.info(TOOLKIT_NAME + ' No layout items found on page right now.');
-            }
-
-            const currentSite = document.location.host.replace(/[:\/]+/g, '-');
-
-            function downloadItem(title, url) {
-                try {
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = title;
-                    if (!/^(https?:)?\/\//i.test(url)) {
-                        a.href = window.location.origin.replace(/\/$/,'') + (url.startsWith('/') ? '' : '/') + url;
-                    }
-                    try { a.click(); }
-                    catch(e) { window.open(a.href, '_blank'); }
-                } catch (e) {
-                    console.warn(TOOLKIT_NAME + ' downloadItem failed:', e);
-                }
-            }
-
-            layouts.each(function() {
-                const $this = $(this);
-                if ($this.data('cp-dl-added')) return;
-                $this.data('cp-dl-added', true);
-
-                const thisLayout = $this.find("h3 a").text().trim();
-                if (!thisLayout) return;
-
-                const downloadXML = $("<a href='#' class='button downloadXML'><i class='fa fa-download'></i><span>XML</span></a>");
-                downloadXML.on('click', function(e) {
-                    e.preventDefault();
-                    const downloadUrl = "/App_Themes/" + encodeURIComponent(thisLayout) + "/" + encodeURIComponent(thisLayout) + ".xml";
-                    downloadItem(currentSite + "-" + thisLayout + ".xml", downloadUrl);
-                });
-
-                const thisLayoutPage = $this.find("a:contains('Layout Page'), a:contains('View Layout Page')").attr("href") || $this.find("h3 a").attr("href");
-
-                const downloadCSS = $("<a href='#' class='button downloadCSS'><i class='fa fa-download'></i><span>CSS</span></a>");
-                downloadCSS.on('click', function(e) {
-                    e.preventDefault();
-                    if (!thisLayoutPage) {
-                        console.warn(TOOLKIT_NAME + ' no layout page link found for layout', thisLayout);
-                        return;
-                    }
-                    const xhr = new XMLHttpRequest();
-                    xhr.onreadystatechange = function() {
-                        if (xhr.readyState === 4) {
-                            if (xhr.status === 200) {
-                                const redirectedURL = xhr.responseURL;
-                                window.jQuery.get(redirectedURL + "?bundle=off", function(data) {
-                                    const cssMatch = data.match(/\/App_Themes\/[^"]*Layout[^"]*/);
-                                    if (cssMatch) {
-                                        downloadItem(currentSite + "-" + thisLayout + ".css", cssMatch[0]);
-                                    } else {
-                                        console.warn(TOOLKIT_NAME + ' Could not locate Layout CSS URL in the layout page response.');
-                                    }
-                                }, "text").fail(function() {
-                                    console.warn(TOOLKIT_NAME + ' $.get failed for layout page.');
-                                });
-                            } else {
-                                console.warn(TOOLKIT_NAME + ' XHR to layout page returned status', xhr.status);
-                            }
-                        }
-                    };
+          $btn.on('click', function (ev) {
+            ev.preventDefault();
+            try {
+              // attempt to fetch XML and CSS from known endpoints (best-effort)
+              var origin = window.location.origin;
+              // Layouts export endpoint: example path assumptions — adjust if needed
+              var layoutId = $('#ctl00_ContentPlaceHolder1_rcbLayouts input[type=hidden]').val() || '';
+              // fallback: attempt to read any inline code block
+              var xmlText = $('code').first().text() || '';
+              // If xml empty, attempt to request the current layout's structure (best-effort)
+              if (!xmlText && layoutId) {
+                fetch(origin + '/Admin/DesignCenter/Layouts/GetXml?layoutId=' + encodeURIComponent(layoutId), { cache: 'no-store' })
+                  .then(function (r) { return r.ok ? r.text() : ''; })
+                  .then(function (txt) {
                     try {
-                        xhr.open("GET", thisLayoutPage, true);
-                        xhr.send();
-                    } catch (err) {
-                        console.warn(TOOLKIT_NAME + ' error fetching layout page', err);
-                    }
-                });
+                      downloadTextAsFile('layout-' + (layoutId || 'export') + '.xml', txt || xmlText || '');
+                    } catch (errd) { console.error('[DownloadXMLCSS] fetch download failed', errd); }
+                  }).catch(function (err) { console.error('[DownloadXMLCSS] fetch error', err); });
+                // attempt CSS download separately (best-effort)
+                try {
+                  fetch(origin + '/Admin/DesignCenter/Layouts/GetCss?layoutId=' + encodeURIComponent(layoutId), { cache: 'no-store' })
+                    .then(function (r) { return r.ok ? r.text() : ''; })
+                    .then(function (css) {
+                      if (css) downloadTextAsFile('layout-' + (layoutId || 'export') + '.css', css);
+                    }).catch(function () { /* ignore */ });
+                } catch (err) { /* ignore */ }
+                return;
+              }
 
-                $this.append(downloadXML, downloadCSS);
-            });
-
-            const $sidebarButtons = $(".contentContainer .sidebar .buttons");
-            if ($sidebarButtons.length) {
-                if ($sidebarButtons.find('.cp-download-all').length === 0) {
-                    const downloadAll = $("<li class='cp-download-all'><a class='button bigButton nextAction' href='#'><span>Download All CSS and XML</span></a></li>");
-                    downloadAll.on('click', function(e) {
-                        e.preventDefault();
-                        $(".downloadXML, .downloadCSS").each(function() { $(this).trigger('click'); });
-                    });
-                    $sidebarButtons.append(downloadAll);
-                }
+              // If we have inline xmlText, download it directly
+              if (xmlText) {
+                downloadTextAsFile('layout-export.xml', xmlText);
+              } else {
+                alert('Unable to locate layout XML to download.');
+              }
+            } catch (err) {
+              console.error('[DownloadXMLCSS] click handler error', err);
             }
-
-            window.__cp_downloadxmlcss_initialized = true;
-            console.info(TOOLKIT_NAME + ' Buttons inserted (or attempted).');
+          });
         } catch (err) {
-            console.warn(TOOLKIT_NAME + ' Error in insertDownloadButtons:', err);
+          console.error('[DownloadXMLCSS] init error', err);
         }
+      });
+    } catch (e) {
+      console.error('[DownloadXMLCSS] setup error', e);
     }
+  }
 
-    // Provide alias/exports
-    global.insertDownloadButtons = insertDownloadButtons;
-    global.downloadxmlcss = insertDownloadButtons;
+  // expose init and auto-run
+  try { window.DownloadXMLCSS = window.DownloadXMLCSS || {}; window.DownloadXMLCSS.init = init; } catch (e) { /* ignore */ }
+  try { window.DownloadXMLCSS.init(); } catch (e) { console.error('[DownloadXMLCSS] autorun error', e); }
 
-    // Auto-run path detection: only run when on Layouts page and CivicPlus
-    (async function autoRun() {
-        try {
-            if (!pageMatches(['/admin/designcenter/layouts'])) return;
-            const isCP = await isCivicPlusSite();
-            if (!isCP) return;
-            setTimeout(() => {
-                try { insertDownloadButtons(); }
-                catch (e) { console.warn(TOOLKIT_NAME + ' autoRun failed', e); }
-            }, 300);
-        } catch (e) {
-            // ignore
-        }
-    })();
-
-})(window);
+})();
