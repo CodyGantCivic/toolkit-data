@@ -22,7 +22,7 @@
     { id: 'graphic_link_helper', name: 'Graphic Link Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/GraphicLinkHelper.js', pages: ['/admin/graphiclinks*'] },
     { id: 'xml_major_change_alert', name: 'XML Major Change Alert', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/XMLMajorChangeAlert.js', pages: ['/admin/designcenter/layouts/modify*'] },
     // New: AllowOpenInNewTab (local upload path)
-    { id: 'allow_open_in_new_tab', name: 'Allow Open In New Tab', url: '/mnt/data/AllowOpenInNewTab.js', pages: ['/admin*'] }
+    { id: 'allow_open_in_new_tab', name: 'Allow Open In New Tab', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AllowOpenInNewTab.js', pages: ['/admin*'] }
   ];
   // ======================================================
 
