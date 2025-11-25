@@ -33,7 +33,7 @@
     // from `modules.json` and injects icons for modules marked as
     // default favorites. It runs on all admin pages because the
     // module list can appear in various admin sections.
-    { id: 'module_icons', name: 'Module Icons', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/moduleIcons.js', pages: ['/admin*'] }
+    { id: 'module_icons', name: 'Module Icons', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/moduleIcons.js', pages: ['*'] }
   ];
   // ======================================================
 
@@ -425,4 +425,3 @@
   })();
 
 })();
-
