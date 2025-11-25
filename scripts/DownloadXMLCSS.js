@@ -14,7 +14,7 @@
   const TOOLKIT = '[CP Toolkit Loader]';
 
   // <<-- Use uploaded local path (your toolchain will transform it). Replace with GitHub RAW if you prefer. -->> 
-  const DOWNLOAD_XML_CSS_URL = '/mnt/data/Snippet Saver-2.7.user.js';
+  const DOWNLOAD_XML_CSS_URL = 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/DownloadXMLCSS.js';
   // If you want direct GitHub fetching, replace the line above with:
   // 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/DownloadXMLCSS.js'
 
