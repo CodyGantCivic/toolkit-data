@@ -1,147 +1,172 @@
+// AllowOpenInNewTab.js
+// Version: 1.0.1
+// Exports: window.AllowOpenInNewTab.init()
+// Purpose: Convert fragile onclick-only links on admin pages into hrefs that can be opened in new tabs,
+// and restore click behavior when the new tab rehydrates state from a referrer containing toolkitRunfn.
+
 (function () {
-    'use strict';
+  'use strict';
 
-    const TOOLKIT_NAME = '[CP Toolkit - Open In New Tab]';
+  const TOOLKIT_NAME = '[CP Toolkit - Open In New Tab]';
 
-    // Idempotency guard
-    if (window.AllowOpenInNewTab && window.AllowOpenInNewTab.__loaded) return;
+  // Idempotency guard & namespace
+  if (window.AllowOpenInNewTab && window.AllowOpenInNewTab.__loaded) return;
 
-    window.AllowOpenInNewTab = {
-        __loaded: false,
+  window.AllowOpenInNewTab = window.AllowOpenInNewTab || {
+    __loaded: false,
+    /**
+     * init() - idempotent initializer. Waits for jQuery, verifies it's an admin page,
+     * and performs link transformations + restore-on-new-tab logic.
+     */
+    init: async function init() {
+      if (window.AllowOpenInNewTab.__loaded) return;
+      window.AllowOpenInNewTab.__loaded = true;
 
-        init: async function () {
-            if (window.AllowOpenInNewTab.__loaded) return;
-            window.AllowOpenInNewTab.__loaded = true;
+      // Only run on admin pages
+      try {
+        const path = window.location.pathname.toLowerCase();
+        if (!path.startsWith('/admin') && !path.startsWith('/admin/')) return;
+      } catch (e) {
+        // cannot determine path -> abort to be safe
+        return;
+      }
 
-            // Only run on admin pages
-            const path = window.location.pathname.toLowerCase();
-            if (!path.startsWith('/admin') && !path.startsWith('/admin/')) return;
-
-            // Prefer loader's CivicPlus check if present
-            if (window.CPToolkit && typeof window.CPToolkit.isCivicPlusSite === 'function') {
-                try {
-                    const ok = await window.CPToolkit.isCivicPlusSite();
-                    if (!ok) return;
-                } catch (e) {
-                    // continue if check fails
-                }
-            }
-
-            // waitFor helper
-            function waitFor(testFn, timeout = 4000, interval = 100) {
-                const start = Date.now();
-                return new Promise(resolve => {
-                    const check = () => {
-                        try {
-                            if (testFn()) return resolve(true);
-                        } catch (e) { /* ignore */ }
-                        if (Date.now() - start >= timeout) return resolve(false);
-                        setTimeout(check, interval);
-                    };
-                    check();
-                });
-            }
-
-            const hasJQ = await waitFor(() => !!window.jQuery, 4000);
-            if (!hasJQ) return; // can't operate safely without jQuery
-
-            const $ = window.jQuery;
-
-            try {
-                $(document).ready(function () {
-                    const moduleReferrer = window.location.pathname.toLowerCase().replace('/admin/', '');
-
-                    // Replace divs with onclicks inside classicItems with equivalent clickable links
-                    $('.classicItems div[onclick]').each(function () {
-                        try {
-                            // create a copy and convert onclick to href wrapper if possible
-                            // safer approach: wrap the div contents with an <a> that has the onclick encoded as toolkitRunfn
-                            const onclick = this.getAttribute('onclick') || '';
-                            if (!onclick) return;
-                            const wrapper = document.createElement('a');
-                            wrapper.setAttribute('href', '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(onclick));
-                            // move children into anchor
-                            while (this.firstChild) wrapper.appendChild(this.firstChild);
-                            this.parentNode.replaceChild(wrapper, this);
-                        } catch (e) { /* ignore individual item failures */ }
-                    });
-
-                    // Convert anchor tags that only have onclicks into usable hrefs so they open in new tabs
-                    $('a[onclick]').each(function () {
-                        try {
-                            const $a = $(this);
-                            const onclick = ($a.attr('onclick') || '').trim();
-                            const href = ($a.attr('href') || '').trim();
-
-                            if (!onclick) return;
-
-                            const onclickFunction = onclick.split('(')[0].trim();
-
-                            // Common onclick handlers we handle by creating a "proxy" href that encodes the onclick action
-                            const handlersToProxy = [
-                                'categoryDetails','displayItemList','CallAlertCategoryDetail','ModifyArchiveMaster',
-                                'BidCategoryModifyDelete','CategoryModifyDelete','ModifyBlogCategory','FAQTopicModifyDelete',
-                                'NotifyMeListAction','PollCategoryModifyDelete','editPhoto','goToSellerProperties',
-                                'CRMCategoryModifyDelete','dirDetail'
-                            ];
-
-                            if (handlersToProxy.indexOf(onclickFunction) !== -1) {
-                                if (!href || href === '#') {
-                                    const newHref = '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(onclick);
-                                    $a.attr('href', newHref);
-                                }
-                                return;
-                            }
-
-                            // For linkDetails we attempt to create a clickable URL that reconstructs the submit behavior.
-                            if (onclickFunction === 'linkDetails') {
-                                if (!href || href === '') {
-                                    // Build a simplified handler that will be passed in the querystring for the new-tab restoration logic.
-                                    // We cannot reliably extract form variable names in all contexts, so create a safe proxy that triggers original onclick when loaded.
-                                    const proxyFn = onclick; // use the original onclick as the payload
-                                    const newHref = '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(proxyFn);
-                                    $a.attr('href', newHref);
-                                }
-                                return;
-                            }
-
-                            // For other known handlers that we don't implement, leave as-is but don't overwrite existing hrefs
-                        } catch (e) {
-                            // ignore
-                        }
-                    });
-
-                    // If page opened in a new tab with toolkitRunfn in referrer -> run it to restore state
-                    try {
-                        if (document.referrer && document.referrer.indexOf('toolkitRunfn') !== -1) {
-                            // parse referrer query param
-                            const match = document.referrer.match(/[?&]toolkitRunfn=([^&]+)/);
-                            if (match && match[1]) {
-                                const encodedFn = match[1];
-                                const fnToRun = decodeURIComponent(encodedFn);
-                                // Execute in page context by injecting a script element
-                                const s = document.createElement('script');
-                                s.textContent = `(function(){ try{ ${fnToRun.replace(/return\s+false;?/,'')} }catch(e){ console.warn('${TOOLKIT_NAME} restore failed', e); } })();`;
-                                document.body.appendChild(s);
-                                // minimal log
-                                console.log(TOOLKIT_NAME, 'Restored click action from new-tab referrer.');
-                            }
-                        }
-                    } catch (e) {
-                        // ignore
-                    }
-                });
-            } catch (err) {
-                console.warn(TOOLKIT_NAME, 'Error:', err);
-            }
-        },
-
-        stop: function () {
-            // nothing persisted that needs explicit teardown currently
+      // If a loader exposes a CivicPlus detection hook, prefer it
+      if (window.CPToolkit && typeof window.CPToolkit.isCivicPlusSite === 'function') {
+        try {
+          const ok = await window.CPToolkit.isCivicPlusSite();
+          if (!ok) return;
+        } catch (e) {
+          // proceed anyway if detection throws
         }
-    };
+      }
 
-    // Auto-run
+      // tiny waitFor helper for page globals
+      function waitFor(testFn, timeout = 4000, interval = 100) {
+        const start = Date.now();
+        return new Promise((resolve) => {
+          (function check() {
+            try {
+              if (testFn()) return resolve(true);
+            } catch (ex) {
+              // ignore test errors
+            }
+            if (Date.now() - start >= timeout) return resolve(false);
+            setTimeout(check, interval);
+          })();
+        });
+      }
+
+      const hasJQ = await waitFor(() => !!window.jQuery, 4000);
+      if (!hasJQ) return; // need jQuery to operate safely
+      const $ = window.jQuery;
+
+      try {
+        $(document).ready(function () {
+          try {
+            const moduleReferrer = window.location.pathname.toLowerCase().replace('/admin/', '');
+
+            // Convert classicItems div[onclick] -> anchor href that encodes the onclick in toolkitRunfn
+            $('.classicItems div[onclick]').each(function () {
+              try {
+                const onclick = this.getAttribute('onclick') || '';
+                if (!onclick) return;
+                const wrapper = document.createElement('a');
+                wrapper.setAttribute(
+                  'href',
+                  '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(onclick)
+                );
+                // move children into anchor
+                while (this.firstChild) wrapper.appendChild(this.firstChild);
+                this.parentNode.replaceChild(wrapper, this);
+              } catch (err) {
+                // ignore element-level errors
+              }
+            });
+
+            // Convert anchor tags that rely only on onclick -> proxy hrefs for supported handlers
+            $('a[onclick]').each(function () {
+              try {
+                const $a = $(this);
+                const onclick = ($a.attr('onclick') || '').trim();
+                const href = ($a.attr('href') || '').trim();
+                if (!onclick) return;
+
+                const onclickFunction = onclick.split('(')[0].trim();
+
+                // handlers we proxy by encoding the onclick into the new-tab URL
+                const handlersToProxy = [
+                  'categoryDetails', 'displayItemList', 'CallAlertCategoryDetail', 'ModifyArchiveMaster',
+                  'BidCategoryModifyDelete', 'CategoryModifyDelete', 'ModifyBlogCategory', 'FAQTopicModifyDelete',
+                  'NotifyMeListAction', 'PollCategoryModifyDelete', 'editPhoto', 'goToSellerProperties',
+                  'CRMCategoryModifyDelete', 'dirDetail'
+                ];
+
+                if (handlersToProxy.indexOf(onclickFunction) !== -1) {
+                  if (!href || href === '#') {
+                    const newHref =
+                      '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(onclick);
+                    $a.attr('href', newHref);
+                  }
+                  return;
+                }
+
+                // Special-case: linkDetails -> encode the original onclick as payload
+                if (onclickFunction === 'linkDetails') {
+                  if (!href || href === '') {
+                    const proxyFn = onclick;
+                    const newHref =
+                      '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(proxyFn);
+                    $a.attr('href', newHref);
+                  }
+                  return;
+                }
+
+                // Otherwise leave href as-is
+              } catch (err) {
+                // ignore element-level errors
+              }
+            });
+
+            // If this page was opened in a new tab and the referrer encoded a toolkitRunfn, execute it to restore state.
+            try {
+              if (document.referrer && document.referrer.indexOf('toolkitRunfn') !== -1) {
+                const match = document.referrer.match(/[?&]toolkitRunfn=([^&]+)/);
+                if (match && match[1]) {
+                  const encodedFn = match[1];
+                  const fnToRun = decodeURIComponent(encodedFn);
+                  // Execute in page context by injecting a script element (keeps execution in page context)
+                  const s = document.createElement('script');
+                  // remove trailing "return false" if present to avoid stopping navigation
+                  const sanitized = fnToRun.replace(/return\s+false;?/gi, '');
+                  s.textContent = `(function(){ try{ ${sanitized} }catch(e){ console.error('${TOOLKIT_NAME} restore failed', e); } })();`;
+                  (document.body || document.documentElement).appendChild(s);
+                  // do not log successful restore to adhere to minimal logging rules
+                }
+              }
+            } catch (err) {
+              // swallow to avoid noisy failures
+            }
+          } catch (e) {
+            // Critical error during DOM ready processing -> surface as console.error
+            console.error(TOOLKIT_NAME + ' initialization error:', e);
+          }
+        });
+      } catch (err) {
+        console.error(TOOLKIT_NAME + ' failed to initialize:', err);
+      }
+    },
+
+    stop: function () {
+      // nothing to clean up for now
+    }
+  };
+
+  // Auto-run, but allow loader to call init() as well — init is idempotent.
+  try {
+    // Defer to DOM ready via the exported init implementation (it does its own wait).
     window.AllowOpenInNewTab.init();
-
+  } catch (e) {
+    console.error(TOOLKIT_NAME + ' auto-run failed:', e);
+  }
 })();
