@@ -1,172 +1,213 @@
 // AllowOpenInNewTab.js
-// Version: 1.0.1
+// CivicPlus - Allow open in new tab helper
 // Exports: window.AllowOpenInNewTab.init()
-// Purpose: Convert fragile onclick-only links on admin pages into hrefs that can be opened in new tabs,
-// and restore click behavior when the new tab rehydrates state from a referrer containing toolkitRunfn.
+// Auto-runs on CivicPlus sites when loaded by the loader
 
-(function () {
+(function (global) {
   'use strict';
 
-  const TOOLKIT_NAME = '[CP Toolkit - Open In New Tab]';
+  const NS = 'AllowOpenInNewTab';
+  const GUARD = '__CP_' + NS + '_LOADED_v1';
 
-  // Idempotency guard & namespace
-  if (window.AllowOpenInNewTab && window.AllowOpenInNewTab.__loaded) return;
+  if (global[GUARD]) return;
+  global[GUARD] = true;
 
-  window.AllowOpenInNewTab = window.AllowOpenInNewTab || {
-    __loaded: false,
-    /**
-     * init() - idempotent initializer. Waits for jQuery, verifies it's an admin page,
-     * and performs link transformations + restore-on-new-tab logic.
-     */
-    init: async function init() {
-      if (window.AllowOpenInNewTab.__loaded) return;
-      window.AllowOpenInNewTab.__loaded = true;
+  // Minimal console wrappers (no noisy logs)
+  function safeError() { try { console.error.apply(console, arguments); } catch (e) {} }
 
-      // Only run on admin pages
+  // Utility: mark anchor to open in new tab (set attribute safely)
+  function markAnchor($a) {
+    try {
+      if (!$a) return;
+      // If already target blank, nothing to do
+      if ($a.target === '_blank') return;
+      // Set target attr
+      $a.setAttribute('target', '_blank');
+      // Add rel noopener/noreferrer if not present
       try {
-        const path = window.location.pathname.toLowerCase();
-        if (!path.startsWith('/admin') && !path.startsWith('/admin/')) return;
-      } catch (e) {
-        // cannot determine path -> abort to be safe
-        return;
-      }
-
-      // If a loader exposes a CivicPlus detection hook, prefer it
-      if (window.CPToolkit && typeof window.CPToolkit.isCivicPlusSite === 'function') {
-        try {
-          const ok = await window.CPToolkit.isCivicPlusSite();
-          if (!ok) return;
-        } catch (e) {
-          // proceed anyway if detection throws
-        }
-      }
-
-      // tiny waitFor helper for page globals
-      function waitFor(testFn, timeout = 4000, interval = 100) {
-        const start = Date.now();
-        return new Promise((resolve) => {
-          (function check() {
-            try {
-              if (testFn()) return resolve(true);
-            } catch (ex) {
-              // ignore test errors
-            }
-            if (Date.now() - start >= timeout) return resolve(false);
-            setTimeout(check, interval);
-          })();
-        });
-      }
-
-      const hasJQ = await waitFor(() => !!window.jQuery, 4000);
-      if (!hasJQ) return; // need jQuery to operate safely
-      const $ = window.jQuery;
-
-      try {
-        $(document).ready(function () {
-          try {
-            const moduleReferrer = window.location.pathname.toLowerCase().replace('/admin/', '');
-
-            // Convert classicItems div[onclick] -> anchor href that encodes the onclick in toolkitRunfn
-            $('.classicItems div[onclick]').each(function () {
-              try {
-                const onclick = this.getAttribute('onclick') || '';
-                if (!onclick) return;
-                const wrapper = document.createElement('a');
-                wrapper.setAttribute(
-                  'href',
-                  '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(onclick)
-                );
-                // move children into anchor
-                while (this.firstChild) wrapper.appendChild(this.firstChild);
-                this.parentNode.replaceChild(wrapper, this);
-              } catch (err) {
-                // ignore element-level errors
-              }
-            });
-
-            // Convert anchor tags that rely only on onclick -> proxy hrefs for supported handlers
-            $('a[onclick]').each(function () {
-              try {
-                const $a = $(this);
-                const onclick = ($a.attr('onclick') || '').trim();
-                const href = ($a.attr('href') || '').trim();
-                if (!onclick) return;
-
-                const onclickFunction = onclick.split('(')[0].trim();
-
-                // handlers we proxy by encoding the onclick into the new-tab URL
-                const handlersToProxy = [
-                  'categoryDetails', 'displayItemList', 'CallAlertCategoryDetail', 'ModifyArchiveMaster',
-                  'BidCategoryModifyDelete', 'CategoryModifyDelete', 'ModifyBlogCategory', 'FAQTopicModifyDelete',
-                  'NotifyMeListAction', 'PollCategoryModifyDelete', 'editPhoto', 'goToSellerProperties',
-                  'CRMCategoryModifyDelete', 'dirDetail'
-                ];
-
-                if (handlersToProxy.indexOf(onclickFunction) !== -1) {
-                  if (!href || href === '#') {
-                    const newHref =
-                      '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(onclick);
-                    $a.attr('href', newHref);
-                  }
-                  return;
-                }
-
-                // Special-case: linkDetails -> encode the original onclick as payload
-                if (onclickFunction === 'linkDetails') {
-                  if (!href || href === '') {
-                    const proxyFn = onclick;
-                    const newHref =
-                      '/Admin/Classic.aspx?fromURL=' + encodeURIComponent(moduleReferrer) + '&toolkitRunfn=' + encodeURIComponent(proxyFn);
-                    $a.attr('href', newHref);
-                  }
-                  return;
-                }
-
-                // Otherwise leave href as-is
-              } catch (err) {
-                // ignore element-level errors
-              }
-            });
-
-            // If this page was opened in a new tab and the referrer encoded a toolkitRunfn, execute it to restore state.
-            try {
-              if (document.referrer && document.referrer.indexOf('toolkitRunfn') !== -1) {
-                const match = document.referrer.match(/[?&]toolkitRunfn=([^&]+)/);
-                if (match && match[1]) {
-                  const encodedFn = match[1];
-                  const fnToRun = decodeURIComponent(encodedFn);
-                  // Execute in page context by injecting a script element (keeps execution in page context)
-                  const s = document.createElement('script');
-                  // remove trailing "return false" if present to avoid stopping navigation
-                  const sanitized = fnToRun.replace(/return\s+false;?/gi, '');
-                  s.textContent = `(function(){ try{ ${sanitized} }catch(e){ console.error('${TOOLKIT_NAME} restore failed', e); } })();`;
-                  (document.body || document.documentElement).appendChild(s);
-                  // do not log successful restore to adhere to minimal logging rules
-                }
-              }
-            } catch (err) {
-              // swallow to avoid noisy failures
-            }
-          } catch (e) {
-            // Critical error during DOM ready processing -> surface as console.error
-            console.error(TOOLKIT_NAME + ' initialization error:', e);
-          }
-        });
-      } catch (err) {
-        console.error(TOOLKIT_NAME + ' failed to initialize:', err);
-      }
-    },
-
-    stop: function () {
-      // nothing to clean up for now
+        var rel = ($a.getAttribute('rel') || '').split(/\s+/).filter(Boolean);
+        if (rel.indexOf('noopener') === -1) rel.push('noopener');
+        if (rel.indexOf('noreferrer') === -1) rel.push('noreferrer');
+        $a.setAttribute('rel', rel.join(' '));
+      } catch (e) {}
+    } catch (e) {
+      safeError('[AllowOpenInNewTab] markAnchor error', e);
     }
-  };
-
-  // Auto-run, but allow loader to call init() as well — init is idempotent.
-  try {
-    // Defer to DOM ready via the exported init implementation (it does its own wait).
-    window.AllowOpenInNewTab.init();
-  } catch (e) {
-    console.error(TOOLKIT_NAME + ' auto-run failed:', e);
   }
-})();
+
+  // Handle a batch of anchor elements (NodeList or Array)
+  function handleAnchorsBatch(list) {
+    try {
+      if (!list) return;
+      for (var i = 0; i < list.length; i++) {
+        try {
+          var a = list[i];
+          if (!a || !a.tagName || a.tagName.toLowerCase() !== 'a') continue;
+          // conditions to consider this anchor as "should open in new tab"
+          var hasFlag = a.hasAttribute('data-openinnewtab') ||
+                        (a.getAttribute('rel') || '').split(/\s+/).indexOf('openinnewtab') !== -1 ||
+                        (a.classList && a.classList.contains('allow-open-in-new-tab'));
+
+          if (hasFlag) {
+            markAnchor(a);
+          }
+        } catch (e) { /* continue */ }
+      }
+    } catch (e) {
+      safeError('[AllowOpenInNewTab] handleAnchorsBatch error', e);
+    }
+  }
+
+  // Delegated click fallback: for anchors that might be prevented from opening normally
+  function installDelegatedClickHandler(doc) {
+    try {
+      if (doc.__cp_allow_open_delegated) return;
+      doc.__cp_allow_open_delegated = true;
+
+      doc.addEventListener('click', function (ev) {
+        try {
+          // find nearest anchor
+          var el = ev.target;
+          while (el && el !== doc) {
+            if (el.tagName && el.tagName.toLowerCase() === 'a') break;
+            el = el.parentNode;
+          }
+          if (!el || el === doc) return;
+          // check the same flags as above
+          var hasFlag = el.hasAttribute('data-openinnewtab') ||
+                        (el.getAttribute('rel') || '').split(/\s+/).indexOf('openinnewtab') !== -1 ||
+                        (el.classList && el.classList.contains('allow-open-in-new-tab'));
+          if (!hasFlag) return;
+
+          // If link has target blank already, let it proceed normally
+          if (el.target === '_blank') return;
+
+          // prevent default and open manually
+          ev.preventDefault();
+          ev.stopPropagation();
+          try {
+            var href = el.href || el.getAttribute('href') || '';
+            if (!href) return;
+            // allow relative URLs to open in same origin
+            global.open(href, '_blank');
+          } catch (e) {
+            // fallback: set target and simulate click
+            try { el.setAttribute('target', '_blank'); el.click(); } catch (_) {}
+          }
+        } catch (e) {
+          // swallow non-fatal errors
+        }
+      }, true); // capture phase to get ahead of site handlers
+    } catch (e) {
+      safeError('[AllowOpenInNewTab] installDelegatedClickHandler error', e);
+    }
+  }
+
+  // Mutation observer to watch for new anchors or attribute changes
+  function installMutationObserver(root) {
+    try {
+      if (!window.MutationObserver) return;
+      if (root.__cp_allow_open_observer_installed) return;
+      var mo = new MutationObserver(function (mutations) {
+        try {
+          for (var i = 0; i < mutations.length; i++) {
+            var m = mutations[i];
+            if (m.type === 'attributes') {
+              if (m.target && m.target.tagName && m.target.tagName.toLowerCase() === 'a') {
+                // attribute changed on an anchor — handle it
+                handleAnchorsBatch([m.target]);
+              }
+            } else {
+              if (m.addedNodes && m.addedNodes.length) {
+                for (var j = 0; j < m.addedNodes.length; j++) {
+                  var node = m.addedNodes[j];
+                  if (!node) continue;
+                  if (node.nodeType === 1) {
+                    if (node.tagName && node.tagName.toLowerCase() === 'a') handleAnchorsBatch([node]);
+                    else {
+                      // query anchors inside this node
+                      var as = node.querySelectorAll && node.querySelectorAll('a[data-openinnewtab], a[rel~="openinnewtab"], a.allow-open-in-new-tab');
+                      if (as && as.length) handleAnchorsBatch(as);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) { /* ignore */ }
+      });
+
+      mo.observe(document.documentElement || document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['href', 'rel', 'class', 'data-openinnewtab']
+      });
+
+      root.__cp_allow_open_observer_installed = true;
+    } catch (e) {
+      safeError('[AllowOpenInNewTab] installMutationObserver error', e);
+    }
+  }
+
+  // initial scan to mark existing anchors
+  function initialScan() {
+    try {
+      var all = document.querySelectorAll && document.querySelectorAll('a[data-openinnewtab], a[rel~="openinnewtab"], a.allow-open-in-new-tab');
+      if (all && all.length) handleAnchorsBatch(all);
+    } catch (e) {
+      safeError('[AllowOpenInNewTab] initialScan error', e);
+    }
+  }
+
+  // The public init function (idempotent)
+  function init() {
+    try {
+      if (init.__cp_done) return;
+      init.__cp_done = true;
+
+      // Attach delegated click handler (capture) so it works even if handler attached
+      installDelegatedClickHandler(document);
+
+      // Initial scan
+      initialScan();
+
+      // Install observer for dynamic content
+      installMutationObserver(document);
+
+      // Best-effort: also scan on visibility/focus in case SPA renders after load
+      try {
+        if (!document.__cp_allow_open_focus_hook) {
+          document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'visible') initialScan();
+          });
+          window.addEventListener('focus', function () { initialScan(); });
+          document.__cp_allow_open_focus_hook = true;
+        }
+      } catch (e) {}
+
+    } catch (e) {
+      safeError('[AllowOpenInNewTab] init error', e);
+    }
+  }
+
+  // Auto-run: only on CivicPlus sites if loader provided detection; otherwise run immediately but safe
+  (function autorun() {
+    try {
+      // prefer loader detection
+      if (global.CPToolkit && typeof global.CPToolkit.isCivicPlusSite === 'function') {
+        Promise.resolve(global.CPToolkit.isCivicPlusSite()).then(function (ok) {
+          if (ok) init();
+        }).catch(function () { init(); });
+      } else {
+        // run quickly — helper is safe to run on any page
+        init();
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // export
+  try { global.AllowOpenInNewTab = global.AllowOpenInNewTab || {}; global.AllowOpenInNewTab.init = init; } catch (e) {}
+
+})(window);
+
