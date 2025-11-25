@@ -1,159 +1,132 @@
 // ==UserScript==
-// @name         CivicPlus - Enforce Advanced Styles Text Limits (Remote)
+// @name         CivicPlus - Widget Skin Helper
 // @namespace    http://civicplus.com/
-// @version      1.0.0
-// @description  Adds character limits to advanced style textareas to prevent save errors
+// @version      1.0.2
+// @description  Advanced style helper for Widget Skins in Theme Manager
 // @author       CivicPlus
 // @match        *://*/*
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
 
-(function(exports) {
+(function() {
     'use strict';
 
-    const TOOLKIT_NAME = '[CP Toolkit - Text Limits]';
+    const TOOLKIT_NAME = '[CP Toolkit - Widget Skin Helper]';
 
-    function pageMatches(patterns) {
-        const url = window.location.href.toLowerCase();
-        const pathname = window.location.pathname.toLowerCase();
-        return patterns.some(pattern => {
-            const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i');
-            return regex.test(url) || regex.test(pathname);
-        });
+    // Check if we're on the correct page (no jQuery needed)
+    const pathname = window.location.pathname.toLowerCase();
+    if (!pathname.includes('/designcenter/themes/')) {
+        return;
     }
 
-    // Core function: idempotent and safe to call multiple times
-    async function enforceAdvancedStyles(options = {}) {
-        options = Object.assign({
-            themeMax: 1000,
-            widgetMax: 255,
-            themePathPattern: '/designcenter/themes/',
-            widgetPathPattern: '/designcenter/widgets/'
-        }, options);
+    console.log(TOOLKIT_NAME + ' Script loaded, waiting for page ready...');
 
-        const isThemeManager = pageMatches([options.themePathPattern]);
-        const isWidgetManager = pageMatches([options.widgetPathPattern]);
+    // Inject code into page context where page's jQuery is available
+    const helperCode = `
+        (function() {
+            console.log('[CP Toolkit - Widget Skin Helper] Injected code running...');
 
-        if (!isThemeManager && !isWidgetManager) {
-            console.log(TOOLKIT_NAME + ' Not on Theme or Widget manager page — nothing to do.');
-            return;
-        }
-
-        // Helper to inject small script into page context (so we can override page functions defined in page JS)
-        function runInPageContext(fn) {
-            try {
-                const script = document.createElement('script');
-                script.type = 'text/javascript';
-                script.textContent = '(' + fn.toString() + ')();';
-                (document.head || document.documentElement).appendChild(script);
-                script.remove();
-            } catch (err) {
-                console.warn(TOOLKIT_NAME + ' failed to run in page context:', err);
+            function checkValidBracket_ts(text) {
+                if (text.indexOf("}") > text.indexOf("{") || ((text.indexOf("}") === -1) && (text.indexOf("{") !== -1))) {
+                    alert("Invalid CSS detected. You appear to be using a { before using a }.");
+                }
+                var numLeftBracket = 0;
+                var numRightBracket = 0;
+                for (var i = 0; i < text.length; i++) {
+                    if (text[i] === "}") numRightBracket++;
+                    else if (text[i] === "{") numLeftBracket++;
+                }
+                var difference = Math.abs(numLeftBracket - numRightBracket);
+                if (numLeftBracket > numRightBracket) {
+                    alert("Invalid CSS. You have " + difference + " extra {.");
+                } else if (numLeftBracket < numRightBracket) {
+                    alert("Invalid CSS. You have " + difference + " extra }.");
+                }
             }
-        }
 
-        try {
-            if (isThemeManager) {
-                // Replace/augment initializePopovers so that popovers get maxlength added
-                runInPageContext(function() {
-                    try {
-                        if (typeof window.initializePopovers === 'undefined') {
-                            // If initializePopovers not present yet, wrap a DOMContentLoaded fallback
-                            document.addEventListener('DOMContentLoaded', function() {
-                                var ta = document.querySelectorAll('.cpPopOver textarea');
-                                ta.forEach(function(t) { t.setAttribute('maxlength', 1000); });
-                            }, { once: true });
-                            return;
-                        }
+            // Wait for both jQuery and initializePopovers
+            function initHelper() {
+                if (typeof window.$ === 'undefined' || typeof window.$.fn === 'undefined') {
+                    console.log('[CP Toolkit - Widget Skin Helper] Waiting for jQuery...');
+                    setTimeout(initHelper, 100);
+                    return;
+                }
 
-                        var originalInitializePopovers = window.initializePopovers;
-                        window.initializePopovers = function() {
-                            try {
-                                originalInitializePopovers();
-                            } catch (e) {
-                                console.warn('[CP Toolkit] error calling original initializePopovers', e);
-                            }
-                            try {
-                                var textAreas = document.querySelectorAll('.cpPopOver textarea');
-                                textAreas.forEach(function(el) { el.setAttribute('maxlength', 1000); });
-                            } catch (e2) {
-                                console.warn('[CP Toolkit] error applying maxlength to popover textareas', e2);
-                            }
-                        };
+                if (typeof window.initializePopovers === 'undefined') {
+                    console.log('[CP Toolkit - Widget Skin Helper] Waiting for initializePopovers...');
+                    setTimeout(initHelper, 100);
+                    return;
+                }
 
-                        // Also proactively set maxlength for any existing popover textareas already present
-                        var existing = document.querySelectorAll('.cpPopOver textarea');
-                        existing.forEach(function(el) { el.setAttribute('maxlength', 1000); });
+                console.log('[CP Toolkit - Widget Skin Helper] jQuery and initializePopovers found, hooking...');
 
-                        console.log('[CP Toolkit] Advanced styles text limit enforced (Theme Manager: 1000 chars)');
-                    } catch (err) {
-                        console.warn('[CP Toolkit] Theme manager enforcement failed', err);
-                    }
-                });
-            } else if (isWidgetManager) {
-                // Replace/augment InitializeWidgetOptionsModal so it sets maxlength on #MiscAdvStyles
-                runInPageContext(function() {
-                    try {
-                        if (typeof window.InitializeWidgetOptionsModal === 'undefined') {
-                            // fallback: observe DOM for the element
-                            var observer = new MutationObserver(function(mutations, obs) {
-                                var el = document.querySelector('#MiscAdvStyles');
-                                if (el) {
-                                    el.setAttribute('maxlength', 255);
-                                    obs.disconnect();
-                                }
+                var originalInitializePopovers = window.initializePopovers;
+
+                window.initializePopovers = function() {
+                    console.log('[CP Toolkit - Widget Skin Helper] initializePopovers called');
+                    originalInitializePopovers();
+
+                    if ($(".cpPopOver #widgetSkinName").length) {
+                        var skinId = $(".cpPopOver input#hdnSkinID").val();
+                        if (skinId !== "-1") {
+                            console.log("[CP Toolkit] Editing skin " + skinId);
+
+                            setTimeout(function() {
+                                var shouldBeFocused = $(".skin" + skinId + " .focused");
+                                $(".focused").not(shouldBeFocused).removeClass("focused");
+                            }, 500);
+
+                            var textAreas = $(".cpPopOver [id*='MiscellaneousStyles']");
+                            textAreas.each(function() {
+                                var elem = this;
+                                var existingEvents = $._data(elem, 'events');
+                                var existingChangeFn = existingEvents && existingEvents.change && existingEvents.change[0] ? existingEvents.change[0].handler : null;
+
+                                var text = $(elem).val();
+                                text = text.replace(/.skin[0-9]+/g, ".skin" + skinId);
+                                $(elem).val(text);
+
+                                $(elem).change(function() {
+                                    var originalText = $(this).text();
+                                    var text = $(this).val().replace(/.skin[0-9]+/g, ".skin" + skinId);
+                                    if (text !== originalText) {
+                                        $(this).val(text);
+                                        if (existingChangeFn) existingChangeFn.call(this);
+                                    }
+                                    checkValidBracket_ts(text);
+                                });
                             });
-                            observer.observe(document.documentElement, { childList: true, subtree: true });
-                            return;
+                        } else {
+                            console.log("[CP Toolkit] Editing new skin.");
+                            var textAreas = $(".cpPopOver [id*='MiscellaneousStyles']");
+                            textAreas.each(function() {
+                                $(this).change(function() {
+                                    var text = $(this).val();
+                                    if (/.skin[0-9]+/g.test(text)) {
+                                        alert("You used a skin number. Save the skin first to get a number.");
+                                    }
+                                    checkValidBracket_ts(text);
+                                });
+                            });
                         }
-
-                        var oldInitOptionsModal = window.InitializeWidgetOptionsModal;
-                        window.InitializeWidgetOptionsModal = function() {
-                            try {
-                                oldInitOptionsModal();
-                            } catch (e) {
-                                console.warn('[CP Toolkit] error calling original InitializeWidgetOptionsModal', e);
-                            }
-                            try {
-                                var el = document.querySelector('#MiscAdvStyles');
-                                if (el) el.setAttribute('maxlength', 255);
-                            } catch (e2) {
-                                console.warn('[CP Toolkit] error applying maxlength to #MiscAdvStyles', e2);
-                            }
-                        };
-
-                        // If the element is already present, set maxlength now
-                        var existing = document.querySelector('#MiscAdvStyles');
-                        if (existing) existing.setAttribute('maxlength', 255);
-
-                        console.log('[CP Toolkit] Advanced styles text limit enforced (Widget Manager: 255 chars)');
-                    } catch (err) {
-                        console.warn('[CP Toolkit] Widget manager enforcement failed', err);
                     }
-                });
+                };
+
+                console.log("[CP Toolkit - Widget Skin Helper] Successfully loaded and hooked");
             }
-        } catch (err) {
-            console.warn(TOOLKIT_NAME + ' Error in enforceAdvancedStyles():', err);
-        }
-    }
 
-    // Expose publicly
-    exports = exports || window;
-    exports.enforceAdvancedStyles = enforceAdvancedStyles;
-
-    // Auto-run if this is already the correct page and within a CivicPlus site (note: the loader also calls the function)
-    // We only auto-run the local check (page path) here; CivicPlus detection is performed by the loader.
-    if (pageMatches(['/DesignCenter/Themes/Index', '/designcenter/themes/'])) {
-        // small timeout to let page scripts initialize
-        setTimeout(function() {
-            try {
-                enforceAdvancedStyles();
-                console.log(TOOLKIT_NAME + ' Auto-run executed.');
-            } catch (e) {
-                console.warn(TOOLKIT_NAME + ' Auto-run failed:', e);
+            // Start initialization
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initHelper);
+            } else {
+                initHelper();
             }
-        }, 600);
-    }
+        })();
+    `;
 
-})(window);
+    const script = document.createElement('script');
+    script.textContent = helperCode;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+})();
