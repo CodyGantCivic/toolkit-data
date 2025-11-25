@@ -1,127 +1,182 @@
-// ==UserScript==
-// @name         CivicPlus - Graphic Link Helper
-// @namespace    http://civicplus.com/
-// @version      1.0.0
-// @description  Advanced style helper for Graphic Links (Fancy Buttons)
-// @author       CivicPlus
-// @match        *://*/*
-// @grant        none
-// @run-at       document-end
-// ==/UserScript==
+// GraphicLinkHelper.js
+// Version: 1.0.1
+// Purpose: Normalize Graphic Links admin page handlers, remove duplicate CSS include, and add helpful notices.
+// Safe wrapper: idempotent + waits for jQuery + DOM ready
+(function globalGraphicLinkHelperWrapper() {
+  'use strict';
 
-(function() {
-    'use strict';
-    
-    const TOOLKIT_NAME = '[CP Toolkit - Graphic Link Helper]';
-    
-    // Check if we're on the correct page
-    function pageMatches(patterns) {
-        const url = window.location.href.toLowerCase();
-        const pathname = window.location.pathname.toLowerCase();
-        
-        return patterns.some(pattern => {
-            const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i');
-            return regex.test(url) || regex.test(pathname);
-        });
-    }
-    
-    // Only run on Graphic Links admin page
-    if (!pageMatches(['/admin/graphiclinks.aspx'])) {
-        return;
-    }
-    
-    // Wait for CP site detection
-    async function init() {
-        if (typeof window.CPToolkit !== 'undefined' && typeof window.CPToolkit.isCivicPlusSite === 'function') {
-            const isCPSite = await window.CPToolkit.isCivicPlusSite();
-            if (!isCPSite) {
-                console.log(TOOLKIT_NAME + ' Not a CivicPlus site, exiting');
-                return;
-            }
-        }
-        
-        console.log(TOOLKIT_NAME + ' Initializing...');
-        
+  // Raw script id (used for idempotent guard)
+  var SCRIPT_ID = 'CP_GraphicLinkHelper_v1_0_1';
+
+  // Idempotent guard
+  if (window.__CPToolkitLoaded && window.__CPToolkitLoaded[SCRIPT_ID]) {
+    return;
+  }
+  window.__CPToolkitLoaded = window.__CPToolkitLoaded || {};
+  // We'll set the flag once the script successfully starts running (below).
+
+  // Utility: wait for condition with timeout
+  function waitFor(conditionFn, cb, checkInterval = 50, timeout = 10000) {
+    var waited = 0;
+    (function _tick() {
+      try {
+        if (conditionFn()) return cb(null);
+      } catch (err) {
+        return cb(err);
+      }
+      waited += checkInterval;
+      if (waited >= timeout) return cb(new Error('waitFor: timeout'));
+      setTimeout(_tick, checkInterval);
+    })();
+  }
+
+  // Main initialization function
+  function init() {
+    try {
+      // mark loaded so re-injection is a no-op
+      window.__CPToolkitLoaded[SCRIPT_ID] = true;
+
+      var $ = window.jQuery;
+      if (!$) return; // defensive
+
+      // Run on DOM ready
+      $(function () {
         try {
-            $(document).ready(function() {
-                if (!$(".actions").length) return;
-                
-                const modifyBtn = $(".modify")[0];
-                if (!modifyBtn) return;
-                
-                const events = $._data(modifyBtn, "events");
-                if (!events || !events.click || !events.click[0]) return;
-                
-                const oldModifyButtonFunction = events.click[0].handler;
-                
-                function newModifyButtonFunction() {
-                    console.log(TOOLKIT_NAME + ' Bound to modify function.');
-                    
-                    oldModifyButtonFunction();
-                    
-                    $("link[href='/Areas/GraphicLinks/Assets/Styles/FancyButtonEditor.css']").remove();
-                    
-                    let currentButtonStyleSelector = "fancyButton1";
-                    if ($(".fancyButtonContainer a.fancyButton").length) {
-                        const classes = $(".fancyButtonContainer a.fancyButton").attr("class");
-                        if (classes) {
-                            const classList = classes.split(" ");
-                            if (classList.length > 1) {
-                                currentButtonStyleSelector = classList[1];
-                            }
-                        }
-                    }
-                    
-                    console.log(TOOLKIT_NAME + ' This button is ' + currentButtonStyleSelector);
-                    
-                    $("textarea.autoUpdate").each(function() {
-                        if (currentButtonStyleSelector === "fancyButton1") {
-                            $(this).parent().prepend("<p style='color: red;'><i>Button not saved yet. Edit again after saving.</i></p>");
-                        }
-                        $(this).parent().prepend("<p>[CP Toolkit] <i>Use .fancyButton1 as selector.</i></p>");
-                        let text = $(this).val();
-                        text = text.replace(/fancyButton[0-9]+/g, "fancyButton1");
-                        $(this).val(text);
-                        $(this).change();
-                    });
-                    
-                    const insertBtn = $(".insertFancy")[0];
-                    if (!insertBtn) return;
-                    
-                    const insertEvents = $._data(insertBtn, "events");
-                    if (!insertEvents || !insertEvents.click || !insertEvents.click[0]) return;
-                    
-                    const oldInsertFancyButtonFunction = insertEvents.click[0].handler;
-                    
-                    function newInsertFancyButton(e) {
-                        $("textarea.autoUpdate").each(function() {
-                            let text = $(this).val();
-                            text = text.replace(/fancyButton[0-9]+/g, currentButtonStyleSelector);
-                            $(this).val(text);
-                            $(this).change();
-                        });
-                        
-                        oldInsertFancyButtonFunction(e);
-                        
-                        const newClass = $(".fancyButtonContainer a.fancyButton")
-                            .attr("class")
-                            .replace(new RegExp("fancyButton1", "g"), currentButtonStyleSelector);
-                        $(".fancyButtonContainer a.fancyButton").attr("class", newClass);
-                    }
-                    
-                    $(".insertFancy").unbind("click").click(newInsertFancyButton);
-                }
-                
-                $(".modify").unbind("click").click(newModifyButtonFunction);
-                $(".fancyButtonContainer").unbind("click").click(newModifyButtonFunction);
-                $("#insertFancyButton").unbind("click").click(newModifyButtonFunction);
-                
-                console.log(TOOLKIT_NAME + ' Successfully loaded');
+          // Remove any previously injected FancyButtonEditor.css link (avoid duplicates)
+          try {
+            $('link[href*="FancyButtonEditor.css"]').remove();
+          } catch (e) {
+            // swallow, non-critical
+            console.error('GraphicLinkHelper: failed removing FancyButtonEditor.css', e);
+          }
+
+          // Add a small notice to any textarea with class .autoUpdate to help admins understand behavior
+          try {
+            $('textarea.autoUpdate').each(function () {
+              var $ta = $(this);
+              if ($ta.data('graphic-link-helper-noted')) return;
+              $ta.data('graphic-link-helper-noted', true);
+              var $note = $('<div>')
+                .addClass('cp-graphiclink-notice')
+                .css({ margin: '6px 0', fontSize: '12px', color: '#444' })
+                .text('Note: This field is auto-saved by Graphic Links. Be sure to preview before publishing.');
+              $ta.before($note);
             });
-        } catch (err) {
-            console.warn(TOOLKIT_NAME + ' Error:', err);
+          } catch (e) {
+            console.error('GraphicLinkHelper: failed adding textarea notice', e);
+          }
+
+          // Wrap/normalize handlers for modify / insertFancy buttons.
+          // Some pages attach inline handlers multiple times or rely on fragile selectors.
+          // We'll find existing handlers (if any) and wrap to ensure consistent behavior.
+          try {
+            function wrapButtonHandler($btn, handlerName) {
+              if (!$btn || $btn.length === 0) return;
+              // Avoid double-wrap
+              if ($btn.data('graphiclink-wrapped')) return;
+              $btn.data('graphiclink-wrapped', true);
+
+              // Store previous click handlers (if any) and call them
+              var prev = $._data($btn[0], 'events') && $._data($btn[0], 'events').click;
+              // create new click handler
+              $btn.off('click.__graphiclink_helper');
+              $btn.on('click.__graphiclink_helper', function (ev) {
+                try {
+                  // Normalization step: replace any "fancyButtonN" classes with a stable "fancy-button" class
+                  var $this = $(this);
+                  var classes = $this.attr('class') || '';
+                  if (/fancyButton\d+/.test(classes)) {
+                    $this.removeClass(function (i, c) {
+                      return (c.match(/fancyButton\d+/g) || []).join(' ');
+                    }).addClass('fancy-button');
+                  }
+                  // Call previous handlers in order
+                  if (prev && prev.length) {
+                    for (var i = 0; i < prev.length; i++) {
+                      try {
+                        prev[i].handler.call(this, ev);
+                      } catch (err) {
+                        console.error('GraphicLinkHelper: previous handler error', err);
+                      }
+                    }
+                  }
+                } catch (err) {
+                  console.error('GraphicLinkHelper: wrapper handler error', err);
+                }
+              });
+            }
+
+            // Find common button selectors used on the Graphic Links page
+            var modifySelectors = [
+              '.modify',                // markup used by control
+              'a[data-action="modify"]',
+              'input[name="modify"]'
+            ];
+            var insertFancySelectors = [
+              '.insertFancy',
+              'a.insertFancy',
+              'button.insertFancy'
+            ];
+
+            // wrap matching elements
+            modifySelectors.forEach(function (sel) {
+              $(sel).each(function () { wrapButtonHandler($(this), 'modify'); });
+            });
+            insertFancySelectors.forEach(function (sel) {
+              $(sel).each(function () { wrapButtonHandler($(this), 'insertFancy'); });
+            });
+
+            // Also observe DOM mutations for dynamically added buttons (to wrap them)
+            try {
+              var observer = new MutationObserver(function (mutations) {
+                mutations.forEach(function (mut) {
+                  (mut.addedNodes || []).forEach(function (node) {
+                    if (!node.querySelectorAll) return;
+                    // check for our selectors
+                    var nodes = node.querySelectorAll(modifySelectors.join(',') + ',' + insertFancySelectors.join(','));
+                    if (nodes && nodes.length) {
+                      $(nodes).each(function () { wrapButtonHandler($(this)); });
+                    }
+                  });
+                });
+              });
+              observer.observe(document.body, { childList: true, subtree: true });
+            } catch (e) {
+              // MutationObserver may not be available in very old browsers; non-critical
+            }
+          } catch (e) {
+            console.error('GraphicLinkHelper: failed wrapping handlers', e);
+          }
+        } catch (e) {
+          console.error('GraphicLinkHelper: initialization error', e);
         }
+      });
+    } catch (err) {
+      console.error('GraphicLinkHelper: init failed', err);
     }
-    
-    init();
+  }
+
+  // Wait for jQuery to be available, then init
+  waitFor(
+    function () { return !!(window.jQuery && document.readyState !== 'loading'); },
+    function (err) {
+      if (err) {
+        // if no jQuery within timeout, try to init anyway after DOMContentLoaded
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', function () {
+            if (window.jQuery) init();
+            else console.warn('GraphicLinkHelper: jQuery not found; aborting.');
+          });
+        } else {
+          if (window.jQuery) init();
+          else console.warn('GraphicLinkHelper: jQuery not found; aborting.');
+        }
+      } else {
+        init();
+      }
+    },
+    50,
+    10000
+  );
+
 })();
