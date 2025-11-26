@@ -1,442 +1,94 @@
-// ==UserScript==
-// @name         CP Toolkit - Remote Loader (with OnLoad Scripts Manager)
-// @namespace    http://civicplus.com/
-// @version      1.4.11
-// @description  Loader for CivicPlus admin helpers (minimal logging). Injects on-load helpers immediately and supports SPA navigation.
-// @match        *://*/*
-// @grant        none
-// @run-at       document-end
-// ==/UserScript==
+// Updated PreventSessionTimeout helper for CivicPlus Toolkit
+// This helper ensures a session stays active by clicking the "Stay signed in" button
+// when the timeout warning appears. It follows the Master Specification rules:
+// - idempotent guard
+// - exports window.PreventSessionTimeout.init()
+// - minimal logging (no console messages except on errors)
+// - page-context safe and no auto-run outside the loader
 
 (function () {
   'use strict';
 
-  const TOOL_NAME = '[CP Toolkit Loader]';
-  const STORAGE_KEY = 'cptoolkit.enabledScripts.v1';
-
-  // ======= Script registry: add your helpers here =======
-  const scriptRegistry = [
-    // Module icons helper: adds FontAwesome icons to favorite modules
-    // in the CivicPlus admin interface. This helper fetches definitions
-    // from `modules.json` and injects icons for modules marked as
-    // default favorites. It runs on all CivicPlus pages.
-    { id: 'module_icons', name: 'Module Icons', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/moduleIcons.js', pages: ['*'] },
-    { id: 'download_xml_css', name: 'Download XML/CSS', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/DownloadXMLCSS.js', pages: ['/admin/designcenter/layouts'] },
-    { id: 'advanced_styles', name: 'Advanced Styles Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AdvancedStylesHelper.js', pages: ['/designcenter/themes*','/designcenter/widgets*'] },
-    { id: 'widget_skin', name: 'Widget Skin Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/widgetSkinHelper.js', pages: ['/designcenter/themes*'] },
-    { id: 'graphic_link_helper', name: 'Graphic Link Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/GraphicLinkHelper.js', pages: ['/admin/graphiclinks*'] },
-    { id: 'xml_major_change_alert', name: 'XML Major Change Alert', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/XMLMajorChangeAlert.js', pages: ['/admin/designcenter/layouts/modify*'] },
-    { id: 'allow_open_in_new_tab', name: 'Allow Open In New Tab', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AllowOpenInNewTab.js', pages: ['/admin*'] },
-    { id: 'prevent_session_timeout', name: 'Prevent Session Timeout', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/PreventSessionTimeout.js', pages: ['/admin*','/designcenter*'] },
-    // Enhances the Design Center pages (Themes, Widgets, Animations) with improved UI and
-    // dropdown functionality. Loads only on those pages.
-    { id: 'theme_manager_enhancer', name: 'Theme Manager Enhancer', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/ThemeManagerEnhancer.js', pages: ['/designcenter/themes*','/designcenter/widgets*','/designcenter/animations*'] }
-
-    // Provides multiple quick link management on the QuickLinks admin page. Allows
-    // administrators to add multiple quick links in a batch and post them via AJAX.
-    ,{ id: 'multiple_quick_links', name: 'Multiple Quick Links', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleQuickLinks.js', pages: ['/admin/quicklinks.aspx*'] }
-
-    // Automatically hides help/welcome tooltips and removes the ShowWelcomeMessage
-    // parameter on CivicPlus sites. Runs on all CivicPlus pages.
-    ,{ id: 'auto_dismiss_help_welcome', name: 'Auto Dismiss Help Welcome', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/auto-dismiss-help-welcome.js', pages: ['*'] }
-
-    // Allows administrators to create multiple categories at once on select
-    // admin pages (Info Center, Graphic Links, Quick Links). Presents a
-    // simple modal to enter category names and statuses, then posts them
-    // via AJAX to the current module.
-    ,{ id: 'multiple_category_upload', name: 'Multiple Category Upload', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleCategoryUpload.js', pages: ['/admin/infoii.aspx*','/admin/graphiclinks.aspx*','/admin/quicklinks.aspx*'] }
-    // Allows administrators to save a single CivicAlert item to multiple
-    // categories. Displays a list of categories on the Civic Alerts item form
-    // and posts the item to each selected category via AJAX.
-    ,{ id: 'multiple_item_upload', name: 'Multiple Item Upload', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleItemUpload.js', pages: ['/admin/civicalerts.aspx*'] }
-  ];
-  // ======================================================
-
-  if (window.top !== window.self) return;
-
-  window.CPToolkit = window.CPToolkit || {};
-  if (window.CPToolkit._managerInstalled) return;
-  window.CPToolkit._managerInstalled = true;
-
-  // --- pageMatches helper (exact if no *) ---
-  function pageMatches(patterns) {
-    try {
-      const pathname = (window.location.pathname || '').toLowerCase();
-      return patterns.some(function (p) {
-        const pat = String(p || '').toLowerCase();
-        if (!pat) return false;
-        if (pat.indexOf('*') >= 0) {
-          const re = new RegExp('^' + pat.replace(/\*/g, '.*') + '$');
-          return re.test(pathname);
-        }
-        if (pathname === pat) return true;
-        if (pathname === (pat + '/')) return true;
-        if (pat.endsWith('/') && pathname === pat.slice(0, -1)) return true;
-        return false;
-      });
-    } catch (e) {
-      return false;
-    }
+  // Prevent multiple initialisations
+  if (window.PreventSessionTimeout && window.PreventSessionTimeout.__loaded) {
+    return;
   }
 
-  // storage
-  function readEnabledMap() {
-    try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
-  }
-  function writeEnabledMap(map) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(map)); return true; } catch (e) { console.error(TOOL_NAME + ' failed saving settings', e); return false; }
-  }
-  function effectiveEnabledMap() {
-    const stored = readEnabledMap();
-    if (!stored) { const allOn = {}; scriptRegistry.forEach(s => allOn[s.id] = true); return allOn; }
-    scriptRegistry.forEach(s => { if (stored[s.id] === undefined) stored[s.id] = true; });
-    return stored;
-  }
+  window.PreventSessionTimeout = {
+    __loaded: false,
 
-  // Minimal manager UI (keeps previous behavior)
-  function createManagerUI() {
-    if (document.getElementById('cptoolkit-manager-root')) return;
-    const root = document.createElement('div');
-    root.id = 'cptoolkit-manager-root';
-    root.innerHTML = `
-      <style>
-        #cptoolkit-fab {
-          position: fixed;
-          right: -60px;
-          top: 20px;
-          /* Position at top right instead of centered vertically */
-          transform: none;
-          width: 48px;
-          height: 48px;
-          border-radius: 50%;
-          background: url('https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/images/civicplus-circle.jpg') no-repeat center/cover;
-          background-size: cover;
-          box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-          cursor: pointer;
-          z-index: 2147483000;
-          transition: right 240ms cubic-bezier(.2,.9,.2,1), opacity 160ms;
-          opacity: 0.95;
-          user-select: none;
-        }
-        #cptoolkit-fab .tab,
-        #cptoolkit-fab .label {
-          display: none;
-        }
-        #cptoolkit-modal {
-          display: none;
-          position: fixed;
-          right: 20px;
-          /* Position the modal directly beneath the icon */
-          top: 80px;
-          width: 420px;
-          max-height: 70vh;
-          overflow: auto;
-          background: #fff;
-          border-radius: 10px;
-          box-shadow: 0 12px 30px rgba(4,12,20,0.3);
-          z-index: 2147483001;
-          padding: 12px;
-          font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-        }
-        #cptoolkit-modal h3 { margin:0 0 8px 0; font-size:14px;}
-        .cptoolkit-entry { display:flex; align-items:center; justify-content:space-between; padding:8px 6px; border-bottom: 1px solid #eef2ff;}
-        .cptoolkit-entry .left { display:flex; gap:8px; align-items:center; }
-        .cptoolkit-entry .meta { font-size:12px; color:#444; }
-        .cptoolkit-controls { display:flex; gap:6px; margin-top:8px; }
-        .cptoolkit-btn { padding:6px 10px; border-radius:6px; cursor:pointer; background:#f3f4f6; border:1px solid #e5e7eb; font-size:13px; }
-        /* Use CivicPlus red accent color instead of blue */
-        .cptoolkit-btn.primary { background:#CC0020; color:#fff; border-color:transparent; }
-        .cptoolkit-link { font-size:12px; color:#CC0020; text-decoration: none; margin-left:6px; }
-      </style>
+    // Called by the loader to activate the helper
+    init: async function () {
+      if (window.PreventSessionTimeout.__loaded) return;
+      window.PreventSessionTimeout.__loaded = true;
 
-      <div id="cptoolkit-fab" title="CP Toolkit" tabindex="0" role="button" aria-label="Open CP Toolkit">
-        <div class="tab" aria-hidden="true"></div>
-        <div class="label">CP</div>
-      </div>
+      // Only run on CivicPlus admin or designcenter pages
+      const path = (window.location.pathname || '').toLowerCase();
+      const isAdminPage =
+        path.startsWith('/admin') ||
+        path.startsWith('/designcenter') ||
+        path.startsWith('/admin/') ||
+        path.startsWith('/designcenter/');
+      if (!isAdminPage) return;
 
-      <div id="cptoolkit-modal" role="dialog" aria-label="On-load scripts manager">
-        <h3>On-load Scripts Manager</h3>
-        <div id="cptoolkit-list"></div>
-        <div class="cptoolkit-controls">
-          <button id="cptoolkit-enable-all" class="cptoolkit-btn">Enable all</button>
-          <button id="cptoolkit-disable-all" class="cptoolkit-btn">Disable all</button>
-        </div>
-      </div>
-    `;
-    document.documentElement.appendChild(root);
+      // Respect the loader's cached detection result. If explicitly false, do nothing.
+      if (window.CPToolkit && window.CPToolkit.isCivicPlusSiteResult === false) {
+        return;
+      }
 
-    const fab = document.getElementById('cptoolkit-fab');
-    const modal = document.getElementById('cptoolkit-modal');
-    const list = document.getElementById('cptoolkit-list');
-    const map = effectiveEnabledMap();
-
-    function renderList() {
-      list.innerHTML = '';
-      scriptRegistry.forEach(s => {
-        const entry = document.createElement('div');
-        entry.className = 'cptoolkit-entry';
-        const left = document.createElement('div'); left.className = 'left';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.id = 'cptoolkit-cb-' + s.id;
-        cb.checked = !!map[s.id];
-        // Persist changes immediately when toggled; no need for a separate save button
-        cb.addEventListener('change', () => {
-          map[s.id] = cb.checked;
-          writeEnabledMap(map);
+      // Helper: wait for a condition (e.g. jQuery existence)
+      const waitFor = (testFn, timeout = 5000, interval = 100) => {
+        const start = Date.now();
+        return new Promise(resolve => {
+          (function check() {
+            try {
+              if (testFn()) return resolve(true);
+            } catch {
+              // Ignore
+            }
+            if (Date.now() - start >= timeout) return resolve(false);
+            setTimeout(check, interval);
+          })();
         });
-        const title = document.createElement('div');
-        // Avoid backtick template literals to prevent truncation in embedding; use string concatenation
-        title.innerHTML = '<div><strong>' + s.name + '</strong></div><div class="meta">' + s.pages.join(', ') + '</div>';
-        left.appendChild(cb); left.appendChild(title);
-        const right = document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; right.style.gap='6px';
-        const openLink = document.createElement('a'); openLink.href = s.url; openLink.target = '_blank'; openLink.className = 'cptoolkit-link'; openLink.textContent = 'Open';
-        right.appendChild(openLink);
-        entry.appendChild(left); entry.appendChild(right); list.appendChild(entry);
-      });
-    }
-    renderList();
+      };
 
-    let visible = false, hideTimer = null;
-    function show() { if (visible) return; visible = true; fab.style.right = '8px'; }
-    function hide() {
-      if (!visible) return;
-      visible = false;
-      // Match the offset used in the CSS definition (right: -60px)
-      fab.style.right = '-60px';
-    }
-    document.addEventListener('mousemove', function (e) {
-      // Detect proximity: near the right edge and near the top (within 120px)
-      const dx = window.innerWidth - e.clientX;
-      const nearRight = dx <= 24;
-      const nearTop = e.clientY <= 120;
-      if (nearRight && nearTop) {
-        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-        show();
-        return;
-      }
-      const rect = fab.getBoundingClientRect();
-      const over = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
-      if (over) {
-        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-        show();
-        return;
-      }
-      if (visible && !hideTimer) hideTimer = setTimeout(hide, 700);
-    }, { passive: true });
+      // Wait for jQuery
+      const hasJQ = await waitFor(() => !!window.jQuery, 4000);
+      if (!hasJQ) return;
+      const $ = window.jQuery;
 
-    // Show the modal on hover (mouseenter) instead of click
-    fab.addEventListener('mouseenter', () => {
-      modal.style.display = 'block';
-      show();
-    });
-    // Hide the modal when leaving the icon unless the pointer is over the modal
-    fab.addEventListener('mouseleave', () => {
-      setTimeout(() => {
-        if (!modal.matches(':hover')) {
-          modal.style.display = 'none';
-          hide();
-        }
-      }, 300);
-    });
-    document.getElementById('cptoolkit-enable-all').addEventListener('click', () => {
-      scriptRegistry.forEach(s => map[s.id] = true);
-      renderList();
-    });
-    document.getElementById('cptoolkit-disable-all').addEventListener('click', () => {
-      scriptRegistry.forEach(s => map[s.id] = false);
-      renderList();
-    });
-
-    // Manage delayed closing of the modal. When the user moves the mouse off the
-    // modal, start a 5‑second timer. If the mouse re‑enters before the timer
-    // expires, cancel the timer so the modal stays open. This allows the UI
-    // to remain visible for a short time after hovering away, per user request.
-    let uiCloseTimer = null;
-    modal.addEventListener('mouseleave', () => {
-      // If a timer is already running, clear it first
-      if (uiCloseTimer) {
-        clearTimeout(uiCloseTimer);
-      }
-      uiCloseTimer = setTimeout(() => {
-        modal.style.display = 'none';
-        hide();
-        uiCloseTimer = null;
-      }, 5000);
-    });
-    modal.addEventListener('mouseenter', () => {
-      if (uiCloseTimer) {
-        clearTimeout(uiCloseTimer);
-        uiCloseTimer = null;
-      }
-    });
-  }
-
-  // Only show the manager UI on CivicPlus sites. Wrap UI creation in a helper.
-  async function maybeCreateManagerUI() {
-    try {
-      const isCP = await isCivicPlusSite();
-      if (isCP) {
-        createManagerUI();
-      }
-    } catch (e) {
-      // ignore detection errors and don't show the UI
-    }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', maybeCreateManagerUI);
-  } else {
-    setTimeout(maybeCreateManagerUI, 0);
-  }
-
-  // CivicPlus detection
-  async function isCivicPlusSite() {
-    try {
-      const testUrl = `${window.location.origin}/Assets/Mystique/Shared/Components/ModuleTiles/Templates/cp-Module-Tile.html`;
-      const res = await fetch(testUrl, { method: 'HEAD', cache: 'no-store' }).catch(()=>null);
-      if (res && (res.ok || res.type === 'opaque')) {
-        console.log('CivicPlus detected');
-        return true;
-      }
-      if (res && res.status === 405) {
-        const r2 = await fetch(testUrl, { method: 'GET', cache: 'no-store' }).catch(()=>null);
-        if (r2 && (r2.ok || r2.type === 'opaque')) {
-          console.log('CivicPlus detected');
-          return true;
+      // Checks for a timeout warning and clicks "Stay signed in" if present
+      function preventTimeout() {
+        const message = $('.cp-UIMessage-text');
+        if (
+          message.length &&
+          message
+            .text()
+            .trim()
+            .startsWith('You will be signed out in')
+        ) {
+          const button = message.find('.cp-Btn, button, a').first();
+          if (button && button.length) {
+            try {
+              button[0].click();
+            } catch {
+              // Ignore click errors
+            }
+          }
         }
       }
-      return false;
-    } catch (e) {
-      console.error(TOOL_NAME + ' detection error', e);
-      return false;
-    }
-  }
 
-  async function fetchAndInject(scriptEntry) {
-    try {
-      const r = await fetch(scriptEntry.url, { cache: 'no-store' });
-      if (!r.ok) throw new Error('fetch failed ' + r.status);
-      const txt = await r.text();
-      if (!txt) throw new Error('empty script');
-      const el = document.createElement('script');
-      el.type = 'text/javascript';
-      el.setAttribute('data-cp-script-id', scriptEntry.id);
-      el.textContent = txt + `\n//# sourceURL=${scriptEntry.url}\n`;
-      (document.head || document.documentElement).appendChild(el);
-      window.CPToolkit.injectedScripts = window.CPToolkit.injectedScripts || {};
-      window.CPToolkit.injectedScripts[scriptEntry.id] = true;
-      return true;
-    } catch (err) {
-      console.error(TOOL_NAME + ' inject error for ' + scriptEntry.name, err);
-      return false;
-    }
-  }
+      // Run immediately and then periodically
+      preventTimeout();
+      window.PreventSessionTimeout._intervalHandle = setInterval(preventTimeout, 120000);
+    },
 
-  function waitForGlobal(name, timeout = 2000, interval = 60) {
-    return new Promise((resolve) => {
-      const start = Date.now();
-      (function check() {
-        const parts = name.split('.');
-        let cur = window;
-        for (const p of parts) { if (!cur) break; cur = cur[p]; }
-        if (cur) return resolve(cur);
-        if (Date.now() - start > timeout) return resolve(null);
-        setTimeout(check, interval);
-      })();
-    });
-  }
-
-  async function maybeInjectAndRun(entry, enabledMap) {
-    try {
-      if (!enabledMap[entry.id]) return false;
-      if (Array.isArray(entry.pages) && entry.pages.length) {
-        if (!pageMatches(entry.pages)) return false;
+    // Optional stop function
+    stop: function () {
+      if (window.PreventSessionTimeout._intervalHandle) {
+        clearInterval(window.PreventSessionTimeout._intervalHandle);
+        delete window.PreventSessionTimeout._intervalHandle;
       }
-      if (!(window.CPToolkit.injectedScripts && window.CPToolkit.injectedScripts[entry.id])) {
-        console.log('Activating ' + entry.name);
-        const ok = await fetchAndInject(entry);
-        if (!ok) return false;
-      }
-
-      // special-case known globals
-      if (entry.id === 'xml_major_change_alert') {
-        const g = await waitForGlobal('XMLMajorChangeAlert', 2500);
-        if (g && typeof g.init === 'function') {
-          try { g.init(); } catch (e) { console.error(TOOL_NAME + ' error calling init for ' + entry.name, e); }
-        }
-        return true;
-      }
-
-      if (entry.id === 'allow_open_in_new_tab') {
-        const g = await waitForGlobal('AllowOpenInNewTab', 1500);
-        if (g && typeof g.init === 'function') {
-          try { g.init(); } catch (e) { console.error(TOOL_NAME + ' error calling init for ' + entry.name, e); }
-        }
-        return true;
-      }
-
-      const candidates = [entry.id, entry.name.replace(/\s+/g, '_'), entry.name.replace(/\s+/g, '')];
-      for (const c of candidates) {
-        const glob = await waitForGlobal(c, 1200);
-        if (glob) {
-          try {
-            if (typeof glob.init === 'function') glob.init();
-            else if (typeof glob === 'function') glob();
-          } catch (e) { console.error(TOOL_NAME + ' error calling init for ' + entry.name, e); }
-          break;
-        }
-      }
-      return true;
-    } catch (err) {
-      console.error(TOOL_NAME + ' maybeInjectAndRun error for ' + entry.name, err);
-      return false;
-    }
-  }
-
-  async function mainFlow() {
-    try {
-      const isCP = await isCivicPlusSite();
-      if (!isCP) return;
-      const enabledMap = effectiveEnabledMap();
-      for (const s of scriptRegistry) {
-        await maybeInjectAndRun(s, enabledMap);
-      }
-    } catch (e) {
-      console.error(TOOL_NAME + ' mainFlow error', e);
-    }
-  }
-
-  (function initialRunner() {
-    try {
-      mainFlow().catch(() => {});
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', mainFlow);
-      } else {
-        setTimeout(mainFlow, 150);
-      }
-    } catch (e) {
-      console.error(TOOL_NAME + ' initialRunner error', e);
-    }
-  })();
-
-  (function setupSpa() {
-    try {
-      let timer = null;
-      function notify() {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(() => { mainFlow().catch(()=>{}); }, 200);
-      }
-      const _push = history.pushState;
-      const _replace = history.replaceState;
-      history.pushState = function () { const res = _push.apply(this, arguments); notify(); return res; };
-      history.replaceState = function () { const res = _replace.apply(this, arguments); notify(); return res; };
-      window.addEventListener('popstate', notify);
-      window.addEventListener('focus', () => mainFlow().catch(()=>{}));
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') mainFlow().catch(()=>{}); });
-    } catch (e) {
-      console.error(TOOL_NAME + ' SPA watcher error', e);
-    }
-  })();
-
+    },
+  };
 })();
