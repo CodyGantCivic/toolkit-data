@@ -16,24 +16,39 @@
 
   // ======= Script registry: add your helpers here =======
   const scriptRegistry = [
+    // Module icons helper: adds FontAwesome icons to favorite modules
+    // in the CivicPlus admin interface. This helper fetches definitions
+    // from `modules.json` and injects icons for modules marked as
+    // default favorites. It runs on all CivicPlus pages.
+    { id: 'module_icons', name: 'Module Icons', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/moduleIcons.js', pages: ['*'] },
     { id: 'download_xml_css', name: 'Download XML/CSS', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/DownloadXMLCSS.js', pages: ['/admin/designcenter/layouts'] },
     { id: 'advanced_styles', name: 'Advanced Styles Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AdvancedStylesHelper.js', pages: ['/designcenter/themes*','/designcenter/widgets*'] },
     { id: 'widget_skin', name: 'Widget Skin Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/widgetSkinHelper.js', pages: ['/designcenter/themes*'] },
     { id: 'graphic_link_helper', name: 'Graphic Link Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/GraphicLinkHelper.js', pages: ['/admin/graphiclinks*'] },
     { id: 'xml_major_change_alert', name: 'XML Major Change Alert', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/XMLMajorChangeAlert.js', pages: ['/admin/designcenter/layouts/modify*'] },
     { id: 'allow_open_in_new_tab', name: 'Allow Open In New Tab', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AllowOpenInNewTab.js', pages: ['/admin*'] },
-    { id: 'prevent_session_timeout', name: 'Prevent Session Timeout', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/PreventSessionTimeout.js', pages: ['/admin*','/designcenter*'] }
-    ,
+    { id: 'prevent_session_timeout', name: 'Prevent Session Timeout', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/PreventSessionTimeout.js', pages: ['/admin*','/designcenter*'] },
     // Enhances the Design Center pages (Themes, Widgets, Animations) with improved UI and
     // dropdown functionality. Loads only on those pages.
     { id: 'theme_manager_enhancer', name: 'Theme Manager Enhancer', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/ThemeManagerEnhancer.js', pages: ['/designcenter/themes*','/designcenter/widgets*','/designcenter/animations*'] }
-    ,
-    // Module icons helper: adds FontAwesome icons to favorite modules
-    // in the CivicPlus admin interface. This helper fetches definitions
-    // from `modules.json` and injects icons for modules marked as
-    // default favorites. It runs on all admin pages because the
-    // module list can appear in various admin sections.
-    { id: 'module_icons', name: 'Module Icons', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/moduleIcons.js', pages: ['*'] }
+
+    // Provides multiple quick link management on the QuickLinks admin page. Allows
+    // administrators to add multiple quick links in a batch and post them via AJAX.
+    ,{ id: 'multiple_quick_links', name: 'Multiple Quick Links', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleQuickLinks.js', pages: ['/admin/quicklinks.aspx*'] }
+
+    // Automatically hides help/welcome tooltips and removes the ShowWelcomeMessage
+    // parameter on CivicPlus sites. Runs on all CivicPlus pages.
+    ,{ id: 'auto_dismiss_help_welcome', name: 'Auto Dismiss Help Welcome', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/auto-dismiss-help-welcome.js', pages: ['*'] }
+
+    // Allows administrators to create multiple categories at once on select
+    // admin pages (Info Center, Graphic Links, Quick Links). Presents a
+    // simple modal to enter category names and statuses, then posts them
+    // via AJAX to the current module.
+    ,{ id: 'multiple_category_upload', name: 'Multiple Category Upload', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleCategoryUpload.js', pages: ['/admin/infoii.aspx*','/admin/graphiclinks.aspx*','/admin/quicklinks.aspx*'] }
+    // Allows administrators to save a single CivicAlert item to multiple
+    // categories. Displays a list of categories on the Civic Alerts item form
+    // and posts the item to each selected category via AJAX.
+    ,{ id: 'multiple_item_upload', name: 'Multiple Item Upload', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleItemUpload.js', pages: ['/admin/civicalerts.aspx*'] }
   ];
   // ======================================================
 
