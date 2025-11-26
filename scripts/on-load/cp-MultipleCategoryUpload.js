@@ -1,537 +1,196 @@
-(function loadTool() {
-  var thisTool = "cp-MultipleCategoryUpload";
-  chrome.storage.local.get(thisTool, function(settings) {
-    detect_if_cp_site(function() {
-      if (settings[thisTool]) {
-        console.log("[CP Toolkit] Loading " + thisTool);
+// Helper: Multiple Category Upload
+// This script adds a simple UI to create multiple categories on CivicPlus
+// admin pages (Info Center, Graphic Links, and Quick Links). It avoids
+// Chrome extension APIs and conforms to the CivicPlus Toolkit helper
+// specification: idempotent guard, exports an init() function, minimal
+// logging, and no automatic execution outside the loader. Users can
+// open the modal, add category names and statuses, then post them via
+// AJAX to the current admin page. After posting, the page reloads.
+
+(function() {
+  'use strict';
+
+  // Prevent running more than once
+  if (window.MultipleCategoryUpload && window.MultipleCategoryUpload.__loaded) {
+    return;
+  }
+
+  window.MultipleCategoryUpload = {
+    __loaded: false,
+    /**
+     * Initialize the helper. Detects CivicPlus sites, waits for jQuery and
+     * category pages, then injects a modal and button to create multiple
+     * categories. Only posts to Info Center, Graphic Links, or Quick Links
+     * admin pages. Reloads the page after categories are posted.
+     */
+    init: async function() {
+      // guard
+      if (window.MultipleCategoryUpload.__loaded) return;
+      window.MultipleCategoryUpload.__loaded = true;
+
+      // CivicPlus detection (if provided by loader). Do nothing if not CP.
+      if (window.CPToolkit && typeof window.CPToolkit.isCivicPlusSite === 'function') {
         try {
-          function appendCode() {
-            $("body")
-              .append(`<style>.block{display:block;width:100%;} .cp-button{background-color:#d3d657 !important;border-bottom-color:#b3b64a !important;} .MultipleCategoryUpload{overflow: scroll;height:800px !important;margin-top:-400px !important;margin-left:-250px !important;position:absolute !important;top:50% !important;left:50% !important;} .calendar-section{padding:10px;border-radius:10px;width:400px;margin-top:20px;} label{color:#0b5486;font-size:1.1rem;font-weight:400;margin:.5rem 0 .25rem;} .modal{display:none;position:fixed;z-index:1;left:0;top:0;width:100%;height:100%;overflow:auto;background-color:rgb(0,0,0);background-color:rgba(0,0,0,0.4);padding-top:60px;} .modal-content{background-color:#fefefe;margin:5% auto 15% auto;border:1px solid #888;width:80%;} .close{position:absolute;right:25px;top:0;color:#000;font-size:35px;font-weight:bold;} .close:hover, .close:focus{color:red;cursor:pointer;} .animate{-webkit-animation:animatezoom 0.6s;animation:animatezoom 0.6s } @-webkit-keyframes animatezoom{from{-webkit-transform:scale(0)} to{-webkit-transform:scale(1)} } @keyframes animatezoom{from{transform:scale(0)} to{transform:scale(1)} } @media screen and (max-width:300px){span.psw{display:block;float:none;} .cancelbtn{width:100%;} } #apiLogin{position: absolute;left: 50%;width: 482px;bottom: 73px !important;z-index: 100000;margin-left: -249px !important;text-align: center;background-color: #ffffff;border-top: 1px solid #0b5486;}#runAPI{position: absolute;left: 50%;width: 482px !important;z-index: 999999;bottom: 162px;background-color: #9fb5cb;border: none;margin-left: -249px !important;text-align: center;border-top: 1px solid #0b5486;text-transform: UPPERCASE;}
-                  .category-section:last-of-type {padding-bottom: 120px;} #addNewSection{float: right;margin-right: 28px;} #removeSection{margin-left: 10px;}</style>`);
-
-            // Modal Window
-            var modalWindow = $(`
-                    <div id="cp-MultipleCategoryUpload" class="modalContainer modalContainerCP MultipleCategoryUpload ui-draggable" style="display: none;">
-                      <div id="cp-MultipleCategoryUpload-TitleBar" class="modalTitleLeft" style="cursor: move;">
-                        <h3 id="cp-MultipleCategoryUpload-Title" class="modalTitle">Category - Multiple Upload</h3>
-                        <a id="cp-MultipleCategoryUpload-CloseButton" class="modalClose" href="#" title="Close this window" tabindex="0">Close</a>
-                        <input type="button" style="width: 108px;" id="addNewSection" value="Add">
-                        <input type="button" style="width: 108px;" id="removeSection" value="Remove">
-                      </div>
-                      <div id="cp-MultipleCategoryUpload-ContentLeft" class="modalContentLeft">
-                        <div id="cp-MultipleCategoryUpload-ContentRight" class="modalContentRight">
-                          <div id="cp-MultipleCategoryUpload-Content" class="modalContent">
-                            <div class="category-section" id="cs1">
-                              <label for="category-Name">Category Name: </label>
-                              <input type="text" name="category-Name" class="block">
-                              <label for="category-Status">Category Status: </label>
-                              <select name="category-Status" class="block">
-                                <option value="Draft">Draft</option>
-                                <option value="Published">Published</option>
-                              </select>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div id="apiLogin" style="display: none;">
-                      <input type="email" placeholder="Enter Username" name="uname" id="uname" autocomplete="on" style="display: block; width:100%">
-                      <input type="password" placeholder="Enter Password" name="psw" id="psw" autocomplete="on" style="display: block; width:100%">
-                    </div>
-                    <button type="button" id="runAPI" class="submitBtn" style="display: none;">Submit</button>
-                    `);
-            var ajaxLoad =
-              'ajaxPostBackStart("Please wait... This will only take a moment.");$("#divAjaxProgress").clone().attr("id", "toolkit-block").css("display", "none").appendTo("body");ajaxPostBackEnd();';
-            var script = document.createElement("script");
-            script.innerHTML = ajaxLoad;
-            document.body.appendChild(script);
-
-            $("body").append(modalWindow);
-
-            $("#cp-MultipleCategoryUpload-CloseButton").click(function() {
-              document.getElementById("cp-MultipleCategoryUpload").style.display = "none";
-              document.getElementById("apiLogin").style.display = "none";
-              document.getElementById("runAPI").style.display = "none";
-              $("#cp-MultipleCategoryUpload-Content")
-                .children(":not(#cs1)")
-                .remove();
-            });
-
-            $("#removeSection").click(function() {
-              $("#cp-MultipleCategoryUpload-Content")
-                .children()
-                .last()
-                .remove();
-            });
-
-            $("#addNewSection").click(function() {
-              var str = `<div class="calendar-section">
-                      <label for="category-Name">Category Name: </label>
-                      <input type="text" name="category-Name" class="block">
-                      <label for="category-Status">Category Status: </label>
-                      <select name="category-Status" class="block">
-                        <option value="Draft">Draft</option>
-                        <option value="Published">Published</option>
-                      </select>
-                    </div>`,
-                div = document.getElementById("cp-MultipleCategoryUpload-Content");
-              div.insertAdjacentHTML("beforeend", str);
-            });
-
-            // Post to Module
-            $("#runAPI").click(function() {
-              if (window.location.pathname.toLowerCase() == "/admin/infoii.aspx") {
-                document.getElementById("toolkit-block").style.display = "block";
-                var categoryName = document.getElementsByName("category-Name");
-                var categoryStatus = document.getElementsByName("category-Status");
-                for (i = 0; i < categoryName.length; i++) {
-                  for (i = 0; i < categoryStatus.length; i++) {
-                    if (categoryStatus[i].value == "Draft") {
-                      var data = {
-                        lngResourceID: 43,
-                        strResourceType: "M",
-                        ysnSave: 1,
-                        intQLCategoryID: 0,
-                        strAction: "qlCategorySave",
-                        txtName: categoryName[i].value,
-                        txtGroupViewList: 1
-                      };
-
-                      $.ajax({
-                        type: "POST",
-                        url: "https://" + document.location.hostname + "/Admin/infoii.aspx",
-                        data: data
-                      }).done(function() {
-                        window.location.reload();
-                      });
-                    } else if (categoryStatus[i].value == "Published") {
-                      var data = {
-                        lngResourceID: 43,
-                        strResourceType: "M",
-                        ysnSave: 1,
-                        intQLCategoryID: 0,
-                        ysnPublishDetail: 1,
-                        strAction: "qlCategorySave",
-                        txtName: categoryName[i].value,
-                        txtGroupViewList: 1
-                      };
-
-                      $.ajax({
-                        type: "POST",
-                        url: "https://" + document.location.hostname + "/Admin/infoii.aspx",
-                        data: data
-                      }).done(function() {
-                        window.location.reload();
-                      });
-                    }
-                  }
-                }
-              } else if (window.location.pathname.toLowerCase() == "/admin/graphiclinks.aspx") {
-                document.getElementById("toolkit-block").style.display = "block";
-                var categoryName = document.getElementsByName("category-Name");
-                var categoryStatus = document.getElementsByName("category-Status");
-                for (i = 0; i < categoryName.length; i++) {
-                  for (i = 0; i < categoryStatus.length; i++) {
-                    if (categoryStatus[i].value == "Draft") {
-                      var data = {
-                        lngResourceID: 43,
-                        strResourceType: "M",
-                        ysnSave: 1,
-                        intQLCategoryID: 0,
-                        strAction: "qlCategorySave",
-                        txtName: categoryName[i].value,
-                        txtGroupViewList: 1
-                      };
-
-                      $.ajax({
-                        type: "POST",
-                        url: "https://" + document.location.hostname + "/Admin/graphiclinks.aspx",
-                        data: data
-                      }).done(function() {
-                        window.location.reload();
-                      });
-                    } else if (categoryStatus[i].value == "Published") {
-                      var data = {
-                        lngResourceID: 43,
-                        strResourceType: "M",
-                        ysnSave: 1,
-                        intQLCategoryID: 0,
-                        ysnPublishDetail: 1,
-                        strAction: "qlCategorySave",
-                        txtName: categoryName[i].value,
-                        txtGroupViewList: 1
-                      };
-
-                      $.ajax({
-                        type: "POST",
-                        url: "https://" + document.location.hostname + "/Admin/graphiclinks.aspx",
-                        data: data
-                      }).done(function() {
-                        window.location.reload();
-                      });
-                    }
-                  }
-                }
-              } else if (window.location.pathname.toLowerCase() == "/admin/quicklinks.aspx") {
-                document.getElementById("toolkit-block").style.display = "block";
-                var categoryName = document.getElementsByName("category-Name");
-                var categoryStatus = document.getElementsByName("category-Status");
-                for (i = 0; i < categoryName.length; i++) {
-                  for (i = 0; i < categoryStatus.length; i++) {
-                    if (categoryStatus[i].value == "Draft") {
-                      var data = {
-                        lngResourceID: 43,
-                        strResourceType: "M",
-                        ysnSave: 1,
-                        intQLCategoryID: 0,
-                        strAction: "qlCategorySave",
-                        txtName: categoryName[i].value,
-                        txtGroupViewList: 1
-                      };
-
-                      $.ajax({
-                        type: "POST",
-                        url: "https://" + document.location.hostname + "/Admin/quicklinks.aspx",
-                        data: data
-                      }).done(function() {
-                        window.location.reload();
-                      });
-                    } else if (categoryStatus[i].value == "Published") {
-                      var data = {
-                        lngResourceID: 43,
-                        strResourceType: "M",
-                        ysnSave: 1,
-                        intQLCategoryID: 0,
-                        ysnPublishDetail: 1,
-                        strAction: "qlCategorySave",
-                        txtName: categoryName[i].value,
-                        txtGroupViewList: 1
-                      };
-
-                      $.ajax({
-                        type: "POST",
-                        url: "https://" + document.location.hostname + "/Admin/quicklinks.aspx",
-                        data: data
-                      }).done(function() {
-                        window.location.reload();
-                      });
-                    }
-                  }
-                }
-              } else {
-                if ($('input[type="email"]')[0].value == "" || $('input[type="password"]')[0].value == "") {
-                  alert("The requested resource requires your Username and Password below");
-                  $('input[type="email"]')[0].focus();
-                } else {
-                  if (window.location.pathname.toLowerCase() == "/admin/formcenter") {
-                    var module = "FormCenter";
-                    document.getElementById("toolkit-block").style.display = "block";
-                    chrome.storage.sync.get(["siteID"], function(result) {
-                      var siteIdVal = JSON.stringify(result);
-                      var siteID = JSON.parse(siteIdVal);
-                      var partition = siteID.siteID;
-
-                      chrome.storage.sync.get(["apiKey"], function(result) {
-                        var apiKeyVal = JSON.stringify(result);
-                        var key = JSON.parse(apiKeyVal);
-                        var apiKey = key.apiKey;
-                        // Run API to Post
-                        try {
-                          var username = document.getElementById("uname").value;
-                          var password = document.getElementById("psw").value;
-
-                          var tokenData = {
-                            Username: username,
-                            Password: password
-                          };
-                          $.ajax({
-                            type: "POST",
-                            url: "https://" + document.location.hostname + "/api/Authentication/v1/Authenticate",
-                            beforeSend: function(request) {
-                              request.setRequestHeader("partition", partition);
-                              request.setRequestHeader("apiKey", apiKey);
-                            },
-                            data: tokenData
-                          }).done(function(userToken) {
-                            var userApiKey = userToken.APIKey;
-                            console.log("User token: " + userApiKey);
-                            // POST category to Calendar
-                            var categoryName = document.getElementsByName("category-Name");
-                            var categoryStatus = document.getElementsByName("category-Status");
-
-                            var i;
-                            for (i = 0; i < categoryName.length; i++) {
-                              for (i = 0; i < categoryStatus.length; i++) {
-                                var data = {
-                                  Name: categoryName[i].value,
-                                  Status: categoryStatus[i].value
-                                };
-
-                                $.ajax({
-                                  type: "POST",
-                                  url: "https://" + document.location.hostname + "/api/" + module + "/v1/Category",
-                                  beforeSend: function(request) {
-                                    request.setRequestHeader("partition", partition);
-                                    request.setRequestHeader("apiKey", apiKey);
-                                    request.setRequestHeader("userApiKey", userApiKey);
-                                  },
-                                  data: data
-                                }).done(function(userToken) {
-                                  document.getElementById("cp-MultipleCategoryUpload").style.display = "none";
-                                  document.getElementById("toolkit-block").style.display = "none";
-                                  document.getElementById("runAPI").style.display = "none";
-                                  document.getElementById("apiLogin").style.display = "none";
-                                  document.getElementById("runAPI").style.display = "none";
-                                  document.getElementById("apiLogin").style.display = "none";
-                                });
-                              }
-                            }
-                          });
-                        } catch (err) {
-                          console.warn(err);
-                        }
-                      });
-                    });
-                  } else if (window.location.pathname.toLowerCase() == "/admin/civicalerts.aspx") {
-                    var module = "NewsFlash";
-                    document.getElementById("toolkit-block").style.display = "block";
-                    chrome.storage.sync.get(["siteID"], function(result) {
-                      var siteIdVal = JSON.stringify(result);
-                      var siteID = JSON.parse(siteIdVal);
-                      var partition = siteID.siteID;
-
-                      chrome.storage.sync.get(["apiKey"], function(result) {
-                        var apiKeyVal = JSON.stringify(result);
-                        var key = JSON.parse(apiKeyVal);
-                        var apiKey = key.apiKey;
-                        // Run API to Post
-                        try {
-                          var username = document.getElementById("uname").value;
-                          var password = document.getElementById("psw").value;
-
-                          var tokenData = {
-                            Username: username,
-                            Password: password
-                          };
-                          $.ajax({
-                            type: "POST",
-                            url: "https://" + document.location.hostname + "/api/Authentication/v1/Authenticate",
-                            beforeSend: function(request) {
-                              request.setRequestHeader("partition", partition);
-                              request.setRequestHeader("apiKey", apiKey);
-                            },
-                            data: tokenData
-                          }).done(function(userToken) {
-                            var userApiKey = userToken.APIKey;
-                            console.log("User token: " + userApiKey);
-                            // POST category to Calendar
-                            var categoryName = document.getElementsByName("category-Name");
-                            var categoryStatus = document.getElementsByName("category-Status");
-
-                            var i;
-                            for (i = 0; i < categoryName.length; i++) {
-                              for (i = 0; i < categoryStatus.length; i++) {
-                                var data = {
-                                  Name: categoryName[i].value,
-                                  Status: categoryStatus[i].value
-                                };
-
-                                $.ajax({
-                                  type: "POST",
-                                  url: "https://" + document.location.hostname + "/api/" + module + "/v1/Category",
-                                  beforeSend: function(request) {
-                                    request.setRequestHeader("partition", partition);
-                                    request.setRequestHeader("apiKey", apiKey);
-                                    request.setRequestHeader("userApiKey", userApiKey);
-                                  },
-                                  data: data
-                                }).done(function(userToken) {
-                                  document.getElementById("cp-MultipleCategoryUpload").style.display = "none";
-                                  document.getElementById("toolkit-block").style.display = "none";
-                                  document.getElementById("runAPI").style.display = "none";
-                                  document.getElementById("apiLogin").style.display = "none";
-                                });
-                              }
-                            }
-                          });
-                        } catch (err) {
-                          console.warn(err);
-                        }
-                      });
-                    });
-                  } else if (window.location.pathname.toLowerCase() == "/admin/calendar.aspx") {
-                    var module = "Calendar";
-                    document.getElementById("toolkit-block").style.display = "block";
-                    chrome.storage.sync.get(["siteID"], function(result) {
-                      var siteIdVal = JSON.stringify(result);
-                      var siteID = JSON.parse(siteIdVal);
-                      var partition = siteID.siteID;
-
-                      chrome.storage.sync.get(["apiKey"], function(result) {
-                        var apiKeyVal = JSON.stringify(result);
-                        var key = JSON.parse(apiKeyVal);
-                        var apiKey = key.apiKey;
-                        // Run API to Post
-                        try {
-                          var username = document.getElementById("uname").value;
-                          var password = document.getElementById("psw").value;
-
-                          var tokenData = {
-                            Username: username,
-                            Password: password
-                          };
-                          $.ajax({
-                            type: "POST",
-                            url: "https://" + document.location.hostname + "/api/Authentication/v1/Authenticate",
-                            beforeSend: function(request) {
-                              request.setRequestHeader("partition", partition);
-                              request.setRequestHeader("apiKey", apiKey);
-                            },
-                            data: tokenData
-                          }).done(function(userToken) {
-                            var userApiKey = userToken.APIKey;
-                            console.log("User token: " + userApiKey);
-                            // POST category to Calendar
-                            var categoryName = document.getElementsByName("category-Name");
-                            var categoryStatus = document.getElementsByName("category-Status");
-
-                            var i;
-                            for (i = 0; i < categoryName.length; i++) {
-                              for (i = 0; i < categoryStatus.length; i++) {
-                                var data = {
-                                  Name: categoryName[i].value,
-                                  Status: categoryStatus[i].value
-                                };
-
-                                $.ajax({
-                                  type: "POST",
-                                  url: "https://" + document.location.hostname + "/api/" + module + "/v1/Category",
-                                  beforeSend: function(request) {
-                                    request.setRequestHeader("partition", partition);
-                                    request.setRequestHeader("apiKey", apiKey);
-                                    request.setRequestHeader("userApiKey", userApiKey);
-                                  },
-                                  data: data
-                                }).done(function(userToken) {
-                                  document.getElementById("cp-MultipleCategoryUpload").style.display = "none";
-                                  document.getElementById("toolkit-block").style.display = "none";
-                                  document.getElementById("runAPI").style.display = "none";
-                                  document.getElementById("apiLogin").style.display = "none";
-                                });
-                              }
-                            }
-                          });
-                        } catch (err) {
-                          console.warn(err);
-                        }
-                      });
-                    });
-                  }
-                }
-              }
-            });
-          }
-          // Create Button + Assign Handler
-
-          if (window.location.href == "https://cp-support.civicplus.com/Admin/Calendar.aspx") {
-            if (document.getElementById("btnCalendarBack")) {
-              document.getElementById("btnCalendarBack").click();
-            }
-          }
-
-          if ($("a:contains('Add Category')").length && window.location.pathname.toLowerCase() == "/admin/formcenter") {
-            appendCode();
-            var uploadMultiple = $(
-              "<li><a href='#CPToolbox' class='button bigButton nextAction cp-button'><span>Add Multiple Categories</span></a></li>"
-            );
-            var thisButtonSection = $("a:contains('Add Category')")
-              .parents()
-              .eq(2)[0];
-            thisButtonSection.prepend(uploadMultiple[0]);
-            uploadMultiple.click(function() {
-              document.getElementById("cp-MultipleCategoryUpload").style.display = "block";
-              document.getElementById("apiLogin").style.display = "block";
-              document.getElementById("runAPI").style.display = "block";
-              var fields = $("#cp-MultipleCategoryUpload-Content .calendar-section input");
-              var i;
-              for (i = 0; i < fields.length; i++) {
-                fields[i].value = "";
-              }
-            });
-          } else if (
-            $("input[value*='Add Category']").length &&
-            window.location.pathname.toLowerCase() == "/admin/civicalerts.aspx"
-          ) {
-            appendCode();
-            var uploadMultiple = $(
-              '<input type="button" class="cp-button" value="Add Multiple Categories" style="margin-left: 5px;">'
-            );
-            var thisButtonSection = $("input[value*='Add Category']");
-            thisButtonSection.after(uploadMultiple[0]);
-            uploadMultiple.click(function() {
-              document.getElementById("cp-MultipleCategoryUpload").style.display = "block";
-              document.getElementById("apiLogin").style.display = "block";
-              document.getElementById("runAPI").style.display = "block";
-              var fields = $("#cp-MultipleCategoryUpload-Content .calendar-section input");
-              var i;
-              for (i = 0; i < fields.length; i++) {
-                fields[i].value = "";
-              }
-            });
-          } else if (
-            $("a:contains('Add Calendar')").length &&
-            window.location.pathname.toLowerCase() == "/admin/calendar.aspx"
-          ) {
-            appendCode();
-            if (window.location.href.indexOf("CID=") > -1) {
-            } else {
-              var uploadMultiple = $(
-                "<li><a href='#CPToolbox' class='button bigButton nextAction cp-button'><span>Add Multiple Calendars</span></a></li>"
-              );
-              var thisButtonSection = $("a:contains('Add Calendar')")
-                .parents()
-                .eq(2)[0];
-              thisButtonSection.prepend(uploadMultiple[0]);
-              uploadMultiple.click(function() {
-                document.getElementById("cp-MultipleCategoryUpload").style.display = "block";
-                document.getElementById("apiLogin").style.display = "block";
-                document.getElementById("runAPI").style.display = "block";
-                var fields = $("#cp-MultipleCategoryUpload-Content .calendar-section input");
-                var i;
-                for (i = 0; i < fields.length; i++) {
-                  fields[i].value = "";
-                }
-              });
-            }
-          } else if (
-            $("input[value*='Add Category']").length &&
-            (window.location.pathname.toLowerCase() == "/admin/infoii.aspx" ||
-              window.location.pathname.toLowerCase() == "/admin/graphiclinks.aspx" ||
-              window.location.pathname.toLowerCase() == "/admin/quicklinks.aspx")
-          ) {
-            appendCode();
-            var uploadMultiple = $(
-              '<input type="button" class="cp-button" value="Add Multiple Categories" style="margin-left: 5px;">'
-            );
-            var thisButtonSection = $("input[value*='Add Category']");
-            thisButtonSection.after(uploadMultiple[0]);
-            uploadMultiple.click(function() {
-              document.getElementById("runAPI").style.bottom = "88px";
-              document.getElementById("cp-MultipleCategoryUpload").style.display = "block";
-              document.getElementById("apiLogin").style.display = "none";
-              document.getElementById("runAPI").style.display = "block";
-              var fields = $("#cp-MultipleCategoryUpload-Content .calendar-section input");
-              var i;
-              for (i = 0; i < fields.length; i++) {
-                fields[i].value = "";
-              }
-            });
-          }
-        } catch (err) {
-          console.warn(err);
+          const isCP = await window.CPToolkit.isCivicPlusSite();
+          if (!isCP) return;
+        } catch (e) {
+          // ignore detection errors
         }
       }
-    });
-  });
+
+      // Paths where category upload applies
+      const path = (window.location.pathname || '').toLowerCase();
+      const validPaths = [
+        '/admin/infoii.aspx',
+        '/admin/graphiclinks.aspx',
+        '/admin/quicklinks.aspx'
+      ];
+      if (!validPaths.includes(path)) return;
+
+      // Wait helper: resolves when testFn returns true or timeout reached
+      function waitFor(testFn, timeout = 8000, interval = 100) {
+        const start = Date.now();
+        return new Promise(resolve => {
+          (function check() {
+            try {
+              if (testFn()) return resolve(true);
+            } catch (e) {
+              // ignore
+            }
+            if (Date.now() - start >= timeout) return resolve(false);
+            setTimeout(check, interval);
+          })();
+        });
+      }
+
+      // Wait for jQuery and an Add Category element
+      const ready = await waitFor(() => {
+        return !!(window.jQuery && (window.jQuery("input[value*='Add Category']").length || window.jQuery("a:contains('Add Category')").length));
+      }, 10000);
+      if (!ready) return;
+
+      const $ = window.jQuery;
+
+      // Inject minimal styles for modal
+      const styleContent = `
+        /* Multiple Category Upload Modal Styles */
+        #cp-mcu-modal { display: none; position: fixed; z-index: 2147483600; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background: rgba(0, 0, 0, 0.4); }
+        #cp-mcu-modal .cp-mcu-content { background: #fff; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 400px; max-width: 90%; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+        #cp-mcu-modal h3 { margin-top: 0; }
+        .cp-mcu-section { margin-bottom: 10px; }
+        .cp-mcu-section input, .cp-mcu-section select { width: 100%; margin-bottom: 4px; padding: 6px; }
+        .cp-mcu-actions { display: flex; justify-content: space-between; gap: 6px; margin-top: 10px; }
+        .cp-mcu-actions button { flex: 1; padding: 6px; border: 1px solid #ccc; border-radius: 4px; background: #f3f4f6; cursor: pointer; }
+        .cp-mcu-actions button:hover { background: #e5e7eb; }
+        #cp-mcu-close { margin-top: 10px; padding: 6px 12px; border: none; background: #e5e7eb; border-radius: 4px; cursor: pointer; }
+        #cp-mcu-close:hover { background: #d1d5db; }
+      `;
+      $('<style>').text(styleContent).appendTo('head');
+
+      // Construct modal structure
+      const modal = $(
+        '<div id="cp-mcu-modal">' +
+          '<div class="cp-mcu-content">' +
+            '<h3>Upload Multiple Categories</h3>' +
+            '<div id="cp-mcu-sections">' +
+              '<div class="cp-mcu-section">' +
+                '<input type="text" class="cp-mcu-name" placeholder="Category Name">' +
+                '<select class="cp-mcu-status">' +
+                  '<option value="Draft">Draft</option>' +
+                  '<option value="Published">Published</option>' +
+                '</select>' +
+              '</div>' +
+            '</div>' +
+            '<div class="cp-mcu-actions">' +
+              '<button type="button" id="cp-mcu-add">Add</button>' +
+              '<button type="button" id="cp-mcu-remove">Remove</button>' +
+              '<button type="button" id="cp-mcu-submit">Submit</button>' +
+            '</div>' +
+            '<button type="button" id="cp-mcu-close">Close</button>' +
+          '</div>' +
+        '</div>'
+      );
+      $('body').append(modal);
+
+      // Modal event handlers
+      $('#cp-mcu-add').on('click', function() {
+        $('#cp-mcu-sections').append(
+          '<div class="cp-mcu-section">' +
+            '<input type="text" class="cp-mcu-name" placeholder="Category Name">' +
+            '<select class="cp-mcu-status">' +
+              '<option value="Draft">Draft</option>' +
+              '<option value="Published">Published</option>' +
+            '</select>' +
+          '</div>'
+        );
+      });
+      $('#cp-mcu-remove').on('click', function() {
+        const sections = $('#cp-mcu-sections .cp-mcu-section');
+        if (sections.length > 1) sections.last().remove();
+      });
+      $('#cp-mcu-close').on('click', function() {
+        $('#cp-mcu-modal').hide();
+      });
+
+      // Submit categories
+      $('#cp-mcu-submit').on('click', function() {
+        const names = $('.cp-mcu-name').map(function() { return $(this).val().trim(); }).get();
+        const statuses = $('.cp-mcu-status').map(function() { return $(this).val(); }).get();
+        const tasks = [];
+        names.forEach(function(name, idx) {
+          if (!name) return;
+          const status = statuses[idx] || 'Draft';
+          const data = {
+            lngResourceID: 43,
+            strResourceType: 'M',
+            ysnSave: 1,
+            intQLCategoryID: 0,
+            strAction: 'qlCategorySave',
+            txtName: name,
+            txtGroupViewList: 1
+          };
+          if (status === 'Published') {
+            data.ysnPublishDetail = 1;
+          }
+          const postUrl = window.location.origin + path;
+          tasks.push(
+            $.ajax({ type: 'POST', url: postUrl, data: data })
+          );
+        });
+        if (tasks.length) {
+          Promise.all(tasks).catch(function() {}) // ignore errors
+            .finally(function() {
+              window.location.reload();
+            });
+        } else {
+          $('#cp-mcu-modal').hide();
+        }
+      });
+
+      // Create and insert the UI trigger button on the page
+      let triggerButton;
+      if ($("input[value*='Add Category']").length) {
+        triggerButton = $('<input type="button" class="cp-button" value="Add Multiple Categories" style="margin-left: 5px;">');
+        $("input[value*='Add Category']").after(triggerButton);
+      } else if ($("a:contains('Add Category')").length) {
+        // For anchor-based buttons (e.g., lists with li > a)
+        triggerButton = $(
+          '<li><a href="#" class="button bigButton nextAction cp-button"><span>Add Multiple Categories</span></a></li>'
+        );
+        const buttonSection = $("a:contains('Add Category')").parents().eq(2);
+        if (buttonSection.length) {
+          buttonSection.prepend(triggerButton);
+        }
+      }
+      if (triggerButton) {
+        triggerButton.on('click', function(event) {
+          event.preventDefault();
+          $('#cp-mcu-modal').show();
+          // reset fields
+          $('#cp-mcu-sections .cp-mcu-name').val('');
+          $('#cp-mcu-sections .cp-mcu-status').val('Draft');
+        });
+      }
+    }
+  };
 })();
