@@ -1,159 +1,182 @@
-// ==UserScript==
-// @name         CivicPlus - Enforce Advanced Styles Text Limits (Remote)
-// @namespace    http://civicplus.com/
-// @version      1.0.0
-// @description  Adds character limits to advanced style textareas to prevent save errors
-// @author       CivicPlus
-// @match        *://*/*
-// @grant        none
-// @run-at       document-end
-// ==/UserScript==
+// Sanitized AdvancedStylesHelper for CivicPlus Toolkit
+// This helper enforces maximum lengths on advanced styles text areas
+// in the DesignCenter Theme and Widget managers. It exports a single
+// `init()` function and includes an idempotent guard so it runs only
+// once per page. All auto‑run logic and console logging from the
+// original script have been removed. Instead, the loader will call
+// `init()` on appropriate pages.
 
-(function(exports) {
-    'use strict';
+(function (global) {
+  'use strict';
 
-    const TOOLKIT_NAME = '[CP Toolkit - Text Limits]';
+  var NAME = 'AdvancedStylesHelper';
+  global[NAME] = global[NAME] || {};
+  // If already initialised, do nothing
+  if (global[NAME].__loaded) {
+    return;
+  }
 
-    function pageMatches(patterns) {
-        const url = window.location.href.toLowerCase();
-        const pathname = window.location.pathname.toLowerCase();
-        return patterns.some(pattern => {
-            const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i');
-            return regex.test(url) || regex.test(pathname);
+  /**
+   * Inject a function into the page context. This is necessary to
+   * override page‑defined functions like initializePopovers and
+   * InitializeWidgetOptionsModal, since Tampermonkey userscripts run in
+   * a sandbox separate from the page’s JavaScript context.
+   * @param {Function} fn The function to run in page context.
+   */
+  function runInPageContext(fn) {
+    try {
+      var script = document.createElement('script');
+      script.type = 'text/javascript';
+      script.textContent = '(' + fn.toString() + ')();';
+      (document.head || document.documentElement).appendChild(script);
+      script.remove();
+    } catch (err) {
+      // Ignore injection errors
+    }
+  }
+
+  /**
+   * Apply maximum length enforcement on the Theme Manager. This
+   * overrides initializePopovers (if present) to set maxlength on
+   * textareas inside .cpPopOver. If initializePopovers does not yet
+   * exist, it adds a DOMContentLoaded fallback. It also ensures that
+   * existing popover textareas have the maxlength applied.
+   */
+  function enforceThemeManager() {
+    runInPageContext(function () {
+      try {
+        // If the page has not defined initializePopovers yet, fall
+        // back to applying maxlength on DOMContentLoaded
+        if (typeof window.initializePopovers === 'undefined') {
+          document.addEventListener(
+            'DOMContentLoaded',
+            function () {
+              try {
+                var ta = document.querySelectorAll('.cpPopOver textarea');
+                ta.forEach(function (t) {
+                  t.setAttribute('maxlength', 1000);
+                });
+              } catch (_) {}
+            },
+            { once: true }
+          );
+          return;
+        }
+        // Save the original implementation once
+        var originalInitializePopovers = window.initializePopovers;
+        // Avoid double wrapping
+        if (!window.initializePopovers.__cpToolkit_override) {
+          window.initializePopovers = function () {
+            try {
+              // Call the original
+              if (typeof originalInitializePopovers === 'function') {
+                originalInitializePopovers.apply(this, arguments);
+              }
+            } catch (_) {}
+            // Apply maxlength to any textareas in newly created popovers
+            try {
+              var textAreas = document.querySelectorAll('.cpPopOver textarea');
+              textAreas.forEach(function (el) {
+                el.setAttribute('maxlength', 1000);
+              });
+            } catch (_) {}
+          };
+          window.initializePopovers.__cpToolkit_override = true;
+        }
+        // Apply maxlength on any existing popover textareas
+        var existing = document.querySelectorAll('.cpPopOver textarea');
+        existing.forEach(function (el) {
+          el.setAttribute('maxlength', 1000);
         });
-    }
+      } catch (_) {
+        // Ignore errors
+      }
+    });
+  }
 
-    // Core function: idempotent and safe to call multiple times
-    async function enforceAdvancedStyles(options = {}) {
-        options = Object.assign({
-            themeMax: 1000,
-            widgetMax: 255,
-            themePathPattern: '/designcenter/themes/',
-            widgetPathPattern: '/designcenter/widgets/'
-        }, options);
-
-        const isThemeManager = pageMatches([options.themePathPattern]);
-        const isWidgetManager = pageMatches([options.widgetPathPattern]);
-
-        if (!isThemeManager && !isWidgetManager) {
-            console.log(TOOLKIT_NAME + ' Not on Theme or Widget manager page — nothing to do.');
-            return;
-        }
-
-        // Helper to inject small script into page context (so we can override page functions defined in page JS)
-        function runInPageContext(fn) {
+  /**
+   * Apply maximum length enforcement on the Widget Manager. This
+   * overrides InitializeWidgetOptionsModal (if present) to set
+   * maxlength on the #MiscAdvStyles textarea. If the function is not
+   * defined, it uses a MutationObserver fallback to watch for the
+   * element. It also sets maxlength on an existing textarea if it
+   * already exists.
+   */
+  function enforceWidgetManager() {
+    runInPageContext(function () {
+      try {
+        if (typeof window.InitializeWidgetOptionsModal === 'undefined') {
+          // Fallback: observe DOM until the element appears
+          var observer = new MutationObserver(function (mutations, obs) {
             try {
-                const script = document.createElement('script');
-                script.type = 'text/javascript';
-                script.textContent = '(' + fn.toString() + ')();';
-                (document.head || document.documentElement).appendChild(script);
-                script.remove();
-            } catch (err) {
-                console.warn(TOOLKIT_NAME + ' failed to run in page context:', err);
-            }
+              var el = document.querySelector('#MiscAdvStyles');
+              if (el) {
+                el.setAttribute('maxlength', 255);
+                obs.disconnect();
+              }
+            } catch (_) {}
+          });
+          observer.observe(document.documentElement, { childList: true, subtree: true });
+        } else {
+          var oldModal = window.InitializeWidgetOptionsModal;
+          // Avoid double wrapping
+          if (!window.InitializeWidgetOptionsModal.__cpToolkit_override) {
+            window.InitializeWidgetOptionsModal = function () {
+              try {
+                if (typeof oldModal === 'function') {
+                  oldModal.apply(this, arguments);
+                }
+              } catch (_) {}
+              try {
+                var el = document.querySelector('#MiscAdvStyles');
+                if (el) {
+                  el.setAttribute('maxlength', 255);
+                }
+              } catch (_) {}
+            };
+            window.InitializeWidgetOptionsModal.__cpToolkit_override = true;
+          }
         }
-
-        try {
-            if (isThemeManager) {
-                // Replace/augment initializePopovers so that popovers get maxlength added
-                runInPageContext(function() {
-                    try {
-                        if (typeof window.initializePopovers === 'undefined') {
-                            // If initializePopovers not present yet, wrap a DOMContentLoaded fallback
-                            document.addEventListener('DOMContentLoaded', function() {
-                                var ta = document.querySelectorAll('.cpPopOver textarea');
-                                ta.forEach(function(t) { t.setAttribute('maxlength', 1000); });
-                            }, { once: true });
-                            return;
-                        }
-
-                        var originalInitializePopovers = window.initializePopovers;
-                        window.initializePopovers = function() {
-                            try {
-                                originalInitializePopovers();
-                            } catch (e) {
-                                console.warn('[CP Toolkit] error calling original initializePopovers', e);
-                            }
-                            try {
-                                var textAreas = document.querySelectorAll('.cpPopOver textarea');
-                                textAreas.forEach(function(el) { el.setAttribute('maxlength', 1000); });
-                            } catch (e2) {
-                                console.warn('[CP Toolkit] error applying maxlength to popover textareas', e2);
-                            }
-                        };
-
-                        // Also proactively set maxlength for any existing popover textareas already present
-                        var existing = document.querySelectorAll('.cpPopOver textarea');
-                        existing.forEach(function(el) { el.setAttribute('maxlength', 1000); });
-
-                        console.log('[CP Toolkit] Advanced styles text limit enforced (Theme Manager: 1000 chars)');
-                    } catch (err) {
-                        console.warn('[CP Toolkit] Theme manager enforcement failed', err);
-                    }
-                });
-            } else if (isWidgetManager) {
-                // Replace/augment InitializeWidgetOptionsModal so it sets maxlength on #MiscAdvStyles
-                runInPageContext(function() {
-                    try {
-                        if (typeof window.InitializeWidgetOptionsModal === 'undefined') {
-                            // fallback: observe DOM for the element
-                            var observer = new MutationObserver(function(mutations, obs) {
-                                var el = document.querySelector('#MiscAdvStyles');
-                                if (el) {
-                                    el.setAttribute('maxlength', 255);
-                                    obs.disconnect();
-                                }
-                            });
-                            observer.observe(document.documentElement, { childList: true, subtree: true });
-                            return;
-                        }
-
-                        var oldInitOptionsModal = window.InitializeWidgetOptionsModal;
-                        window.InitializeWidgetOptionsModal = function() {
-                            try {
-                                oldInitOptionsModal();
-                            } catch (e) {
-                                console.warn('[CP Toolkit] error calling original InitializeWidgetOptionsModal', e);
-                            }
-                            try {
-                                var el = document.querySelector('#MiscAdvStyles');
-                                if (el) el.setAttribute('maxlength', 255);
-                            } catch (e2) {
-                                console.warn('[CP Toolkit] error applying maxlength to #MiscAdvStyles', e2);
-                            }
-                        };
-
-                        // If the element is already present, set maxlength now
-                        var existing = document.querySelector('#MiscAdvStyles');
-                        if (existing) existing.setAttribute('maxlength', 255);
-
-                        console.log('[CP Toolkit] Advanced styles text limit enforced (Widget Manager: 255 chars)');
-                    } catch (err) {
-                        console.warn('[CP Toolkit] Widget manager enforcement failed', err);
-                    }
-                });
-            }
-        } catch (err) {
-            console.warn(TOOLKIT_NAME + ' Error in enforceAdvancedStyles():', err);
+        // Set maxlength immediately if element already exists
+        var existing = document.querySelector('#MiscAdvStyles');
+        if (existing) {
+          existing.setAttribute('maxlength', 255);
         }
+      } catch (_) {
+        // Ignore errors
+      }
+    });
+  }
+
+  /**
+   * Main initialiser function. Determines whether the current page
+   * corresponds to the Theme Manager or Widget Manager and applies
+   * appropriate maximum length enforcement.
+   */
+  function init() {
+    if (global[NAME].__loaded) {
+      return;
     }
-
-    // Expose publicly
-    exports = exports || window;
-    exports.enforceAdvancedStyles = enforceAdvancedStyles;
-
-    // Auto-run if this is already the correct page and within a CivicPlus site (note: the loader also calls the function)
-    // We only auto-run the local check (page path) here; CivicPlus detection is performed by the loader.
-    if (pageMatches(['/DesignCenter/Themes/Index', '/designcenter/themes/'])) {
-        // small timeout to let page scripts initialize
-        setTimeout(function() {
-            try {
-                enforceAdvancedStyles();
-                console.log(TOOLKIT_NAME + ' Auto-run executed.');
-            } catch (e) {
-                console.warn(TOOLKIT_NAME + ' Auto-run failed:', e);
-            }
-        }, 600);
+    global[NAME].__loaded = true;
+    try {
+      var pathname = (global.location && global.location.pathname) || '';
+      var path = pathname.toLowerCase();
+      var isTheme = path.indexOf('/designcenter/themes') !== -1;
+      var isWidget = path.indexOf('/designcenter/widgets') !== -1;
+      if (!isTheme && !isWidget) {
+        return;
+      }
+      if (isTheme) {
+        enforceThemeManager();
+      }
+      if (isWidget) {
+        enforceWidgetManager();
+      }
+    } catch (_) {
+      // ignore errors
     }
+  }
 
+  // Expose the init method on the global object
+  global[NAME].init = init;
 })(window);
