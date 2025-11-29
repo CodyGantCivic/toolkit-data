@@ -107,7 +107,9 @@
         '  font-weight: 400 !important;',
         '  position: absolute;',
         '  top: 4px;',
-        '  z-index: 5;',
+        // Ensure buttons do not overlap other CMS controls by
+        // placing them beneath native buttons (z-index 1)
+        '  z-index: 1;',
         '}',
         '.downloadXML { right: 221px; }',
         '.downloadCSS { right: 120px; }',
@@ -212,4 +214,3 @@
   window.DownloadXMLCSS.init = init;
 
 })();
-
