@@ -1,13 +1,13 @@
-// Helper: Multiple Category Upload
+// cp-MultipleCategoryUpload.js - Optimised CivicPlus Toolkit helper
+//
 // This script adds a simple UI to create multiple categories on CivicPlus
-// admin pages (Info Center, Graphic Links, and Quick Links). It avoids
-// Chrome extension APIs and conforms to the CivicPlus Toolkit helper
-// specification: idempotent guard, exports an init() function, minimal
-// logging, and no automatic execution outside the loader. Users can
-// open the modal, add category names and statuses, then post them via
-// AJAX to the current admin page. After posting, the page reloads.
+// admin pages (Info Center, Graphic Links, and Quick Links).  The original
+// version depended on jQuery and used polling to wait for elements.  This
+// version uses native DOM APIs, a MutationObserver-based wait helper, and
+// fetch for posting categories.  It exports a single idempotent init() and
+// only runs on the appropriate admin pages.
 
-(function() {
+(function () {
   'use strict';
 
   // Prevent running more than once
@@ -17,14 +17,7 @@
 
   window.MultipleCategoryUpload = {
     __loaded: false,
-    /**
-     * Initialize the helper. Detects CivicPlus sites, waits for jQuery and
-     * category pages, then injects a modal and button to create multiple
-     * categories. Only posts to Info Center, Graphic Links, or Quick Links
-     * admin pages. Reloads the page after categories are posted.
-     */
-    init: async function() {
-      // guard
+    init: async function () {
       if (window.MultipleCategoryUpload.__loaded) return;
       window.MultipleCategoryUpload.__loaded = true;
 
@@ -47,29 +40,37 @@
       ];
       if (!validPaths.includes(path)) return;
 
-      // Wait helper: resolves when testFn returns true or timeout reached
+      /**
+       * Wait for a selector to appear in the DOM. Uses MutationObserver and
+       * times out after the specified milliseconds.
+       * @param {() => boolean} testFn Function to test the condition.
+       * @param {number} timeout Maximum time to wait in ms.
+       * @returns {Promise<boolean>} Resolves true if condition met, false otherwise.
+       */
       function waitFor(testFn, timeout = 8000, interval = 100) {
-        const start = Date.now();
-        return new Promise(resolve => {
-          (function check() {
-            try {
-              if (testFn()) return resolve(true);
-            } catch (e) {
-              // ignore
-            }
-            if (Date.now() - start >= timeout) return resolve(false);
-            setTimeout(check, interval);
-          })();
-        });
+      const start = Date.now();
+      return new Promise((resolve) => {
+        (function check() {
+          try {
+            if (testFn()) return resolve(true);
+          } catch (e) {
+            // ignore
+          }
+          if (Date.now() - start >= timeout) return resolve(false);
+          setTimeout(check, interval);
+        })();
+      });
       }
 
-      // Wait for jQuery and an Add Category element
+      // Wait for Add Category button/input to be present
       const ready = await waitFor(() => {
-        return !!(window.jQuery && (window.jQuery("input[value*='Add Category']").length || window.jQuery("a:contains('Add Category')").length));
+        // Input with value containing 'Add Category'
+        if (document.querySelector("input[value*='Add Category']")) return true;
+        // Anchor containing text 'Add Category'
+        const anchors = Array.from(document.querySelectorAll('a'));
+        return anchors.some(a => /Add Category/i.test(a.textContent));
       }, 10000);
       if (!ready) return;
-
-      const $ = window.jQuery;
 
       // Inject minimal styles for modal
       const styleContent = `
@@ -85,110 +86,135 @@
         #cp-mcu-close { margin-top: 10px; padding: 6px 12px; border: none; background: #e5e7eb; border-radius: 4px; cursor: pointer; }
         #cp-mcu-close:hover { background: #d1d5db; }
       `;
-      $('<style>').text(styleContent).appendTo('head');
+      const styleEl = document.createElement('style');
+      styleEl.textContent = styleContent;
+      document.head.appendChild(styleEl);
 
       // Construct modal structure
-      const modal = $(
-        '<div id="cp-mcu-modal">' +
-          '<div class="cp-mcu-content">' +
-            '<h3>Upload Multiple Categories</h3>' +
-            '<div id="cp-mcu-sections">' +
-              '<div class="cp-mcu-section">' +
-                '<input type="text" class="cp-mcu-name" placeholder="Category Name">' +
-                '<select class="cp-mcu-status">' +
-                  '<option value="Draft">Draft</option>' +
-                  '<option value="Published">Published</option>' +
-                '</select>' +
-              '</div>' +
-            '</div>' +
-            '<div class="cp-mcu-actions">' +
-              '<button type="button" id="cp-mcu-add">Add</button>' +
-              '<button type="button" id="cp-mcu-remove">Remove</button>' +
-              '<button type="button" id="cp-mcu-submit">Submit</button>' +
-            '</div>' +
-            '<button type="button" id="cp-mcu-close">Close</button>' +
-          '</div>' +
-        '</div>'
-      );
-      $('body').append(modal);
+      const modal = document.createElement('div');
+      modal.id = 'cp-mcu-modal';
+      modal.innerHTML = `
+        <div class="cp-mcu-content">
+          <h3>Upload Multiple Categories</h3>
+          <div id="cp-mcu-sections">
+            <div class="cp-mcu-section">
+              <input type="text" class="cp-mcu-name" placeholder="Category Name">
+              <select class="cp-mcu-status">
+                <option value="Draft">Draft</option>
+                <option value="Published">Published</option>
+              </select>
+            </div>
+          </div>
+          <div class="cp-mcu-actions">
+            <button type="button" id="cp-mcu-add">Add</button>
+            <button type="button" id="cp-mcu-remove">Remove</button>
+            <button type="button" id="cp-mcu-submit">Submit</button>
+          </div>
+          <button type="button" id="cp-mcu-close">Close</button>
+        </div>
+      `;
+      document.body.appendChild(modal);
 
       // Modal event handlers
-      $('#cp-mcu-add').on('click', function() {
-        $('#cp-mcu-sections').append(
-          '<div class="cp-mcu-section">' +
-            '<input type="text" class="cp-mcu-name" placeholder="Category Name">' +
-            '<select class="cp-mcu-status">' +
-              '<option value="Draft">Draft</option>' +
-              '<option value="Published">Published</option>' +
-            '</select>' +
-          '</div>'
-        );
+      document.getElementById('cp-mcu-add').addEventListener('click', function() {
+        const sections = document.getElementById('cp-mcu-sections');
+        const div = document.createElement('div');
+        div.className = 'cp-mcu-section';
+        div.innerHTML = `
+          <input type="text" class="cp-mcu-name" placeholder="Category Name">
+          <select class="cp-mcu-status">
+            <option value="Draft">Draft</option>
+            <option value="Published">Published</option>
+          </select>
+        `;
+        sections.appendChild(div);
       });
-      $('#cp-mcu-remove').on('click', function() {
-        const sections = $('#cp-mcu-sections .cp-mcu-section');
-        if (sections.length > 1) sections.last().remove();
+      document.getElementById('cp-mcu-remove').addEventListener('click', function() {
+        const sections = document.querySelectorAll('#cp-mcu-sections .cp-mcu-section');
+        if (sections.length > 1) sections[sections.length - 1].remove();
       });
-      $('#cp-mcu-close').on('click', function() {
-        $('#cp-mcu-modal').hide();
+      document.getElementById('cp-mcu-close').addEventListener('click', function() {
+        modal.style.display = 'none';
       });
 
       // Submit categories
-      $('#cp-mcu-submit').on('click', function() {
-        const names = $('.cp-mcu-name').map(function() { return $(this).val().trim(); }).get();
-        const statuses = $('.cp-mcu-status').map(function() { return $(this).val(); }).get();
+      document.getElementById('cp-mcu-submit').addEventListener('click', function() {
+        const nameInputs = Array.from(document.querySelectorAll('.cp-mcu-name'));
+        const statusSelects = Array.from(document.querySelectorAll('.cp-mcu-status'));
         const tasks = [];
-        names.forEach(function(name, idx) {
+        nameInputs.forEach(function(input, idx) {
+          const name = input.value.trim();
           if (!name) return;
-          const status = statuses[idx] || 'Draft';
-          const data = {
-            lngResourceID: 43,
-            strResourceType: 'M',
-            ysnSave: 1,
-            intQLCategoryID: 0,
-            strAction: 'qlCategorySave',
-            txtName: name,
-            txtGroupViewList: 1
-          };
+          const status = statusSelects[idx] ? statusSelects[idx].value : 'Draft';
+          const data = new URLSearchParams();
+          data.append('lngResourceID', '43');
+          data.append('strResourceType', 'M');
+          data.append('ysnSave', '1');
+          data.append('intQLCategoryID', '0');
+          data.append('strAction', 'qlCategorySave');
+          data.append('txtName', name);
+          data.append('txtGroupViewList', '1');
           if (status === 'Published') {
-            data.ysnPublishDetail = 1;
+            data.append('ysnPublishDetail', '1');
           }
           const postUrl = window.location.origin + path;
           tasks.push(
-            $.ajax({ type: 'POST', url: postUrl, data: data })
+            fetch(postUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+              body: data.toString(),
+              credentials: 'same-origin'
+            })
           );
         });
         if (tasks.length) {
-          Promise.all(tasks).catch(function() {}) // ignore errors
-            .finally(function() {
-              window.location.reload();
-            });
+          Promise.allSettled(tasks).finally(function() {
+            window.location.reload();
+          });
         } else {
-          $('#cp-mcu-modal').hide();
+          modal.style.display = 'none';
         }
       });
 
       // Create and insert the UI trigger button on the page
       let triggerButton;
-      if ($("input[value*='Add Category']").length) {
-        triggerButton = $('<input type="button" class="cp-button" value="Add Multiple Categories" style="margin-left: 5px;">');
-        $("input[value*='Add Category']").after(triggerButton);
-      } else if ($("a:contains('Add Category')").length) {
+      const addInput = document.querySelector("input[value*='Add Category']");
+      if (addInput) {
+        triggerButton = document.createElement('input');
+        triggerButton.type = 'button';
+        triggerButton.className = 'cp-button';
+        triggerButton.value = 'Add Multiple Categories';
+        triggerButton.style.marginLeft = '5px';
+        addInput.insertAdjacentElement('afterend', triggerButton);
+      } else {
         // For anchor-based buttons (e.g., lists with li > a)
-        triggerButton = $(
-          '<li><a href="#" class="button bigButton nextAction cp-button"><span>Add Multiple Categories</span></a></li>'
-        );
-        const buttonSection = $("a:contains('Add Category')").parents().eq(2);
-        if (buttonSection.length) {
-          buttonSection.prepend(triggerButton);
+        const addAnchor = Array.from(document.querySelectorAll('a')).find(a => /Add Category/i.test(a.textContent));
+        if (addAnchor) {
+          triggerButton = document.createElement('li');
+          const link = document.createElement('a');
+          link.href = '#';
+          link.className = 'button bigButton nextAction cp-button';
+          link.innerHTML = '<span>Add Multiple Categories</span>';
+          triggerButton.appendChild(link);
+          // Insert at the correct parent list
+          let parent = addAnchor.parentElement;
+          // ascend until we find a UL or appropriate container
+          for (let i = 0; i < 3 && parent && parent.tagName.toLowerCase() !== 'ul'; i++) {
+            parent = parent.parentElement;
+          }
+          if (parent) {
+            parent.insertBefore(triggerButton, parent.firstChild);
+          }
+          triggerButton = link;
         }
       }
       if (triggerButton) {
-        triggerButton.on('click', function(event) {
+        triggerButton.addEventListener('click', function(event) {
           event.preventDefault();
-          $('#cp-mcu-modal').show();
+          modal.style.display = 'block';
           // reset fields
-          $('#cp-mcu-sections .cp-mcu-name').val('');
-          $('#cp-mcu-sections .cp-mcu-status').val('Draft');
+          document.querySelectorAll('#cp-mcu-sections .cp-mcu-name').forEach(function(inp) { inp.value = ''; });
+          document.querySelectorAll('#cp-mcu-sections .cp-mcu-status').forEach(function(sel) { sel.value = 'Draft'; });
         });
       }
     }
