@@ -86,19 +86,19 @@
     try {
       const parent = document.getElementById('GraphicLink_OpenInNewWindow');
       if (!parent) return;
-      const container = parent.closest('td') || parent.parentElement;
-      if (!container) return;
       // Prevent duplicate insertion
       if (document.getElementById('enableGraphicButtonAutochange')) return;
-      // Create checkbox wrapper
+      // Build the wrapper with the checkbox and warning div
       const wrapper = document.createElement('div');
       wrapper.innerHTML =
         "<label class='check' style='width:47%' for='enableGraphicButtonAutochange'>" +
         "<input type='checkbox' id='enableGraphicButtonAutochange'>[CP Toolkit] Enable graphic link autochanger" +
         '</label>' +
         "<div style='color: red;' id='graphicButtonChangeWarn'></div>";
-      // Append after the parent container
-      container.appendChild(wrapper);
+      // Insert the wrapper immediately after the OpenInNewWindow input.  This
+      // preserves the original position of the label relative to the existing
+      // controls, matching the pre-refactor layout.
+      parent.parentNode.insertBefore(wrapper, parent.nextSibling);
       // If linkUrl is empty (new link), enable autochanger by default
       const linkInput = document.getElementById('linkUrl');
       const checkbox = document.getElementById('enableGraphicButtonAutochange');
