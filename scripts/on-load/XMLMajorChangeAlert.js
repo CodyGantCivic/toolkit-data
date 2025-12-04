@@ -1,244 +1,320 @@
-// Sanitized XMLMajorChangeAlert helper for CivicPlus Toolkit
-// Purpose: alert administrators when uploading an XML that removes or misplaces content containers.
-// Exports: window.XMLMajorChangeAlert.init()
+// Optimised XMLMajorChangeAlert helper for CivicPlus Toolkit
+//
+// This refactoring removes the dependency on jQuery and expensive DOM
+// polling.  It uses native DOM APIs and MutationObservers to detect when
+// the XML upload input appears and to watch for error messages.  The
+// helper warns administrators if a new layout XML removes existing
+// containers or if content containers are malformed (contain nested
+// elements).  It also updates the Save button’s style and text to
+// indicate when the warning is active.  The helper exposes a single
+// `init()` method and is idempotent.
 
 (function (global) {
   'use strict';
 
-  var NAME = 'XMLMajorChangeAlert';
+  const NAME = 'XMLMajorChangeAlert';
   global[NAME] = global[NAME] || {};
-  if (global[NAME].__loaded) return;
-
-  // waitFor: resolves when condition is true or timeout reached
-  function waitFor(test, timeout, interval) {
-    timeout = typeof timeout === 'number' ? timeout : 5000;
-    interval = typeof interval === 'number' ? interval : 80;
-    var start = Date.now();
-    return new Promise(function (resolve) {
-      (function check() {
-        try {
-          if (test()) return resolve(true);
-        } catch (e) {}
-        if (Date.now() - start >= timeout) return resolve(false);
-        setTimeout(check, interval);
-      })();
-    });
+  if (global[NAME].__loaded) {
+    return;
   }
 
-  // XML parsing utilities
+  // Store the original XML and its element IDs
+  let originalIds = [];
+
+  /**
+   * Parse an XML string into a DOM Document.  Returns null on failure.
+   * @param {string} xml
+   * @returns {Document|null}
+   */
   function parseXml(xml) {
-    try { return new DOMParser().parseFromString(xml || '', 'text/xml'); } catch (e) { return null; }
-  }
-  function extractIds(xml) {
-    var doc = parseXml(xml);
-    if (!doc) return [];
-    return Array.from(doc.querySelectorAll('*'))
-      .map(function (n) { try { return n.getAttribute && n.getAttribute('id'); } catch (_) { return null; } })
-      .filter(Boolean);
-  }
-  function findMalformed(xml) {
-    var doc = parseXml(xml);
-    if (!doc) return [];
-    return Array.from(doc.querySelectorAll('[cpRole="contentContainer"]'))
-      .filter(function (n) { return n.children && n.children.length; })
-      .map(function (n) {
-        return {
-          id: n.getAttribute('id') || '(no id)',
-          childIds: Array.from(n.children).map(function (c) { return c.id || '(no id)'; })
-        };
-      });
-  }
-
-  // Create or find the alert element near the XML structure input
-  function ensureAlert($) {
     try {
-      var $parent = $('#structureFile').parent();
-      if ($parent && $parent.length) {
-        if ($('#toolkitAlert').length === 0) {
-          $parent.append('<div id="toolkitAlert" style="margin:6px 0;font-size:13px"></div>');
-        }
-        return $('#toolkitAlert');
-      }
-    } catch (e) {}
-    // fallback: create a bare element if jQuery is not available yet
-    try {
-      var el = document.getElementById('toolkitAlert');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'toolkitAlert';
-        el.style.margin = '6px 0';
-        el.style.fontSize = '13px';
-        (document.body || document.documentElement).insertBefore(el, (document.body || document.documentElement).firstChild);
-      }
-      return global.jQuery ? global.jQuery(el) : null;
-    } catch (e) {
+      return new DOMParser().parseFromString(xml || '', 'text/xml');
+    } catch (_) {
       return null;
     }
   }
 
-  // Track original XML and container IDs
-  var originalXml = '';
-  var originalIds = [];
-  function refreshOriginal($) {
+  /**
+   * Extract all element IDs from the given XML string.
+   * @param {string} xml
+   * @returns {string[]}
+   */
+  function extractIds(xml) {
+    const doc = parseXml(xml);
+    if (!doc) return [];
+    return Array.from(doc.querySelectorAll('*'))
+      .map((n) => {
+        try {
+          return n.getAttribute && n.getAttribute('id');
+        } catch (_) {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  }
+
+  /**
+   * Find any content containers (elements with cpRole="contentContainer")
+   * that incorrectly contain children.  Returns an array of objects with
+   * the container id and its child ids.
+   * @param {string} xml
+   */
+  function findMalformed(xml) {
+    const doc = parseXml(xml);
+    if (!doc) return [];
+    return Array.from(doc.querySelectorAll('[cprole="contentContainer"]'))
+      .filter((n) => n.children && n.children.length)
+      .map((n) => {
+        return {
+          id: n.getAttribute('id') || '(no id)',
+          childIds: Array.from(n.children).map((c) => c.id || '(no id)'),
+        };
+      });
+  }
+
+  /**
+   * Create or locate the alert element used to display warnings.  It
+   * attempts to append to the file input’s parent if available, falling
+   * back to the top of the body.  Returns the alert element.
+   * @returns {HTMLElement}
+   */
+  function ensureAlert() {
+    let alertEl = document.getElementById('toolkitAlert');
+    if (alertEl) return alertEl;
+    alertEl = document.createElement('div');
+    alertEl.id = 'toolkitAlert';
+    alertEl.style.margin = '6px 0';
+    alertEl.style.fontSize = '13px';
+    alertEl.style.whiteSpace = 'pre-line';
+    // Try to insert after the file input’s parent if present
+    const fileInput = document.getElementById('structureFile');
+    if (fileInput && fileInput.parentNode) {
+      fileInput.parentNode.appendChild(alertEl);
+    } else {
+      // Otherwise insert at the beginning of the body
+      const parent = document.body || document.documentElement;
+      parent.insertBefore(alertEl, parent.firstChild);
+    }
+    return alertEl;
+  }
+
+  /**
+   * Update the Save button’s appearance and text depending on whether
+   * there are removed container IDs.  If there are removed IDs, set a
+   * red background and change the label to warn about ignoring the XML
+   * warning; otherwise restore the original styling.
+   * @param {boolean} hasRemoved Whether any containers were removed.
+   */
+  function updateSaveButton(hasRemoved) {
     try {
-      originalXml = ($('code').first().text() || '').trim();
-      originalIds = extractIds(originalXml).sort();
-    } catch (e) {
-      originalXml = '';
+      const saveBtn = document.querySelector('a.button.save');
+      if (!saveBtn) return;
+      const span = saveBtn.querySelector('span');
+      if (hasRemoved) {
+        saveBtn.style.backgroundColor = '#B33A3A';
+        saveBtn.style.borderBottomColor = '#792327';
+        saveBtn.style.color = '#fff';
+        if (span) span.textContent = 'Save ignoring XML warning';
+      } else {
+        saveBtn.style.backgroundColor = '';
+        saveBtn.style.borderBottomColor = '';
+        saveBtn.style.color = '';
+        if (span) span.textContent = 'Save';
+      }
+    } catch (_) {
+      // silently ignore style errors
+    }
+  }
+
+  /**
+   * Refresh the stored original XML IDs by reading the first <code>
+   * element’s text content.  Called on initialisation and whenever the
+   * page becomes visible or gains focus.  If no <code> element exists,
+   * originalIds is reset to an empty array.
+   */
+  function refreshOriginal() {
+    try {
+      const code = document.querySelector('code');
+      const xmlText = code ? code.textContent.trim() : '';
+      originalIds = extractIds(xmlText).sort();
+    } catch (_) {
       originalIds = [];
     }
   }
 
-  function handleFileInput(el, $) {
+  /**
+   * Handle a file input change event.  Reads the selected file as text,
+   * compares its container IDs to the original, displays warnings for
+   * removed containers, updates the Save button styling, and alerts
+   * about malformed containers.
+   * @param {HTMLInputElement} input
+   */
+  function handleFileInput(input) {
     try {
-      var file = el && el.files && el.files[0];
+      const file = input && input.files && input.files[0];
+      const alertEl = ensureAlert();
       if (!file) {
-        try { $('#toolkitAlert').text(''); } catch (_) {}
+        // Clear alert and reset button if no file selected
+        alertEl.textContent = '';
+        updateSaveButton(false);
         return;
       }
-      var reader = new FileReader();
+      const reader = new FileReader();
       reader.onload = function (ev) {
         try {
-          var raw = ev.target && ev.target.result ? ev.target.result : '';
-          var idx = raw.indexOf('<?xml');
-          var newXml = idx >= 0 ? raw.slice(idx) : raw;
-          var newIds = extractIds(newXml).sort();
-          var removed = originalIds.filter(function (id) { return newIds.indexOf(id) < 0; });
-          var $alert = ensureAlert($);
+          const raw = ev.target && ev.target.result ? ev.target.result : '';
+          const idx = raw.indexOf('<?xml');
+          const newXml = idx >= 0 ? raw.slice(idx) : raw;
+          const newIds = extractIds(newXml).sort();
+          // Determine which IDs have been removed
+          const removed = originalIds.filter((id) => newIds.indexOf(id) < 0);
           if (removed.length) {
-            var diff = removed.join(', ');
-            if ($alert && $alert.length) {
-              $alert.html('Warning: The new XML is missing containers:<br><br>' + diff).css('color', 'red');
-            }
-            $('a.button.save').css({ backgroundColor: '#B33A3A', borderBottomColor: '#792327', color: '#fff' });
-            $('a.button.save span').text('Save ignoring XML warning');
+            alertEl.innerHTML =
+              'Warning: The new XML is missing containers:\n\n' + removed.join(', ');
+            alertEl.style.color = 'red';
+            updateSaveButton(true);
           } else {
-            if ($alert && $alert.length) $alert.text('This XML keeps all existing containers.').css('color', 'green');
-            $('a.button.save').css({ backgroundColor: '', borderBottomColor: '', color: '' });
-            $('a.button.save span').text('Save');
+            alertEl.textContent = 'This XML keeps all existing containers.';
+            alertEl.style.color = 'green';
+            updateSaveButton(false);
           }
-          // Check for malformed containers in the new XML
-          var mal = findMalformed(newXml);
-          mal.forEach(function (m) {
+          // Check for malformed containers
+          const mal = findMalformed(newXml);
+          mal.forEach((m) => {
             try {
-              alert('The chosen XML is malformed:\n\n' + m.id + ' contains:\n\n' + m.childIds.join('\n') + '\n\nContent containers must not contain elements.');
+              alert(
+                'The chosen XML is malformed:\n\n' +
+                  m.id +
+                  ' contains:\n\n' +
+                  m.childIds.join('\n') +
+                  '\n\nContent containers must not contain elements.'
+              );
             } catch (_) {}
           });
-        } catch (e) {}
+        } catch (_) {
+          // ignore errors during file read
+        }
       };
       reader.readAsText(file);
-    } catch (e) {}
+    } catch (_) {
+      // ignore handler errors
+    }
   }
 
-  function attachHandlers($) {
+  /**
+   * Attach event listeners to the structure file input and error message
+   * element (if present).  Refreshes the original XML IDs when called.
+   */
+  function attachHandlers() {
     try {
-      if ($(document.body).data('__cp_xml_handlers')) return;
-      $(document.body).data('__cp_xml_handlers', true);
-      $(document).on('change.XMLMajorChangeAlert', '#structureFile', function () { handleFileInput(this, global.jQuery || global.$); });
-      $(document).on('DOMSubtreeModified.XMLMajorChangeAlert', '#ErrorMessage', function () {
-        try {
-          var t = $(this).text().trim();
-          if (t) alert(t);
-        } catch (_) {}
-      });
-      refreshOriginal($);
-    } catch (e) {}
+      const fileInput = document.getElementById('structureFile');
+      if (fileInput && !fileInput.__cp_xml_handlers_attached) {
+        fileInput.__cp_xml_handlers_attached = true;
+        fileInput.addEventListener('change', function () {
+          handleFileInput(fileInput);
+        });
+        // On initial attachment, refresh original IDs
+        refreshOriginal();
+      }
+      const errorMsg = document.getElementById('ErrorMessage');
+      if (errorMsg && !errorMsg.__cp_xml_error_observer) {
+        const errObserver = new MutationObserver(() => {
+          try {
+            const text = (errorMsg.textContent || '').trim();
+            if (text) {
+              alert(text);
+            }
+          } catch (_) {}
+        });
+        errObserver.observe(errorMsg, { childList: true, subtree: true });
+        errorMsg.__cp_xml_error_observer = errObserver;
+      }
+    } catch (_) {
+      // ignore attaching errors
+    }
   }
 
-  function installMutationObserver($) {
+  /**
+   * Watch the document for insertion of the structureFile input.  When
+   * it appears, attach handlers and refresh the original XML.  This
+   * uses a MutationObserver on the body to catch dynamic content
+   * insertion without polling.
+   */
+  function watchForStructureFile() {
     try {
-      var root = document.body || document.documentElement;
+      const root = document.body || document.documentElement;
       if (!root || root.__cp_xml_observer_installed) return;
-      var mo = new MutationObserver(function (mutations) {
+      const mo = new MutationObserver((mutations) => {
         try {
-          for (var i = 0; i < mutations.length; i++) {
-            var m = mutations[i];
+          for (const m of mutations) {
             if (m.addedNodes && m.addedNodes.length) {
-              for (var j = 0; j < m.addedNodes.length; j++) {
-                var node = m.addedNodes[j];
+              for (const node of m.addedNodes) {
                 if (!node) continue;
                 try {
-                  if (node.id === 'structureFile' || (node.querySelector && node.querySelector('#structureFile'))) {
-                    refreshOriginal($);
-                    attachHandlers($);
+                  if (
+                    node.id === 'structureFile' ||
+                    (node.querySelector && node.querySelector('#structureFile'))
+                  ) {
+                    // Found the file input; attach handlers
+                    attachHandlers();
                     return;
                   }
                 } catch (_) {}
               }
             }
           }
-        } catch (e) {}
+        } catch (_) {
+          /* ignore */
+        }
       });
       mo.observe(root, { childList: true, subtree: true });
-      root.__cp_xml_observer_installed = true;
-    } catch (e) {}
+      root.__cp_xml_observer_installed = mo;
+    } catch (_) {
+      // ignore observer setup errors
+    }
   }
 
-  // Fallback: attempt to attach handlers as soon as the structure input appears
-  function rafAndIntervalFallback($) {
-    try {
-      var attempts = 0;
-      (function loop() {
-        try {
-          if (document.querySelector('#structureFile')) { refreshOriginal($); attachHandlers($); return; }
-        } catch (e) {}
-        attempts++;
-        if (attempts < 200) {
-          requestAnimationFrame(loop);
-        } else {
-          var id = setInterval(function () {
-            try {
-              if (document.querySelector('#structureFile')) { refreshOriginal($); attachHandlers($); clearInterval(id); }
-            } catch (e) {}
-          }, 200);
-        }
-      })();
-    } catch (e) {}
-  }
-
-  // The init function called by the loader
-  async function init() {
+  /**
+   * Initialise the XMLMajorChangeAlert helper.  Runs only on the
+   * DesignCenter layout modify page.  Sets up initial handlers and
+   * watchers and hooks into visibility/focus events to refresh the
+   * original XML IDs when the page becomes active again.
+   */
+  function init() {
     if (global[NAME].__loaded) return;
     global[NAME].__loaded = true;
-    // Only run on DesignCenter layout modify page
+    // Check the URL path
     try {
-      var p = (location.pathname || '').toLowerCase();
-      if (p.indexOf('/admin/designcenter/layouts/modify') === -1) return;
-    } catch (e) { return; }
-    // Wait for jQuery for up to 3 seconds; fallback if not ready
-    var ok = await waitFor(function () { return !!global.jQuery && document.readyState !== 'loading'; }, 3000, 80);
-    var $ = global.jQuery || global.$;
-    if (ok) {
-      attachHandlers($);
-    } else {
-      // Poll for jQuery; attach when available
-      (function poll() {
-        var poller = setInterval(function () {
-          if (global.jQuery) {
-            clearInterval(poller);
-            try { attachHandlers(global.jQuery); } catch (e) {}
-          }
-        }, 200);
-      })();
+      const path = (global.location && global.location.pathname || '').toLowerCase();
+      if (path.indexOf('/admin/designcenter/layouts/modify') === -1) return;
+    } catch (_) {
+      return;
     }
-    // Install mutation observer and fallback to catch dynamic insertion
-    installMutationObserver($ || global.jQuery);
-    rafAndIntervalFallback($ || global.jQuery);
-    // Re-run on visibility or focus to refresh original
-    if (!document.__cp_xml_visibility_hook) {
-      document.addEventListener('visibilitychange', function () {
-        if (document.visibilityState === 'visible') {
-          try { refreshOriginal(global.jQuery || global.$); attachHandlers(global.jQuery || global.$); } catch (e) {}
-        }
-      });
-      window.addEventListener('focus', function () {
-        try { refreshOriginal(global.jQuery || global.$); attachHandlers(global.jQuery || global.$); } catch (e) {}
-      });
-      document.__cp_xml_visibility_hook = true;
+    try {
+      // Attach handlers if the structureFile input already exists
+      attachHandlers();
+      // Start observing for the input if not yet present
+      watchForStructureFile();
+      // Refresh original XML and attach on visibility/focus
+      if (!document.__cp_xml_visibility_hook) {
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'visible') {
+            refreshOriginal();
+            attachHandlers();
+          }
+        });
+        window.addEventListener('focus', function () {
+          refreshOriginal();
+          attachHandlers();
+        });
+        document.__cp_xml_visibility_hook = true;
+      }
+    } catch (_) {
+      // ignore init errors
     }
   }
 
-  // Export init
+  // Expose the init function
   global[NAME].init = init;
 
 })(window);
