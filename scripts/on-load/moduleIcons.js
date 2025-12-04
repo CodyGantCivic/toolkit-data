@@ -1,35 +1,10 @@
-// Sanitized Module Icons helper for the CivicPlus Toolkit
-//
-// This script adds FontAwesome icons to favorite modules in the CivicPlus
-// admin interface. The original version relied on Chrome extension APIs
-// (chrome.storage and chrome.extension) and executed automatically.
-// In accordance with the CivicPlus Toolkit Master Specification, this
-// version removes all Chrome extension dependencies, avoids auto‑running
-// outside the loader, and exports a single idempotent `init()` function.
-//
-// The helper works by fetching the `modules.json` file from the
-// repository, identifying modules that are marked as default favorites
-// and have a default icon, and then injecting the appropriate icon
-// before the module’s link. The loader will call `ModuleIcons.init()`
-// when appropriate (on CivicPlus pages, after jQuery and the module
-// list are available).
-
-// Updated Module Icons helper for the CivicPlus Toolkit
+// ModuleIcons.js - Optimised CivicPlus Toolkit helper
 //
 // This script injects FontAwesome icons into the module list on CivicPlus admin
-// pages. It replaces the original Chrome extension version with a
-// Tampermonkey‑compatible implementation that runs quickly and avoids
-// repeated polling. Icons are only added for modules marked as default
-// favorites and with a non‑empty default icon defined in `modules.json`.
-//
-// Key improvements:
-// 1. Uses a single waitFor call to detect the presence of jQuery and the
-//    module list, eliminating repeated timeouts.
-// 2. Loads FontAwesome from a CDN (cdnjs) to avoid slow or blocked
-//    requests to raw.githubusercontent.com.
-// 3. Runs on all CivicPlus pages (the loader still applies CivicPlus
-//    detection) and re-runs once after a short delay to catch any
-//    dynamically injected modules.
+// pages.  It replaces the original jQuery-based implementation with a
+// native‑DOM version that runs quickly and avoids repeated polling.  Icons are
+// only added for modules marked as default favorites with a non‑empty default
+// icon defined in `modules.json`.
 
 (function () {
   'use strict';
@@ -55,52 +30,93 @@
         }
       }
 
-      // Helper to wait for a condition (e.g., jQuery availability or module list)
-      const waitFor = (testFn, timeout = 5000, interval = 100) => {
-        const start = Date.now();
-        return new Promise(resolve => {
-          (function check() {
-            try {
-              if (testFn()) return resolve(true);
-            } catch {
-              // ignore
+      /**
+       * Ensure FontAwesome icons are loaded.  Returns a promise that
+       * resolves once the stylesheet has loaded or if icons already
+       * exist on the page.  Uses a CDN to avoid slow raw GitHub fetches.
+       */
+      function ensureFontAwesome() {
+        return new Promise(function (resolve) {
+          try {
+            // If any FA classes are present, assume it is loaded.
+            if (document.querySelector('.fa, .fas, .far, .fal, .fab')) {
+              resolve();
+              return;
             }
-            if (Date.now() - start >= timeout) return resolve(false);
-            setTimeout(check, interval);
-          })();
+            // If the stylesheet is already injected, wait briefly and resolve.
+            if (document.getElementById('moduleicons-fa')) {
+              setTimeout(resolve, 200);
+              return;
+            }
+            var link = document.createElement('link');
+            link.id = 'moduleicons-fa';
+            link.rel = 'stylesheet';
+            link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css';
+            link.onload = resolve;
+            link.onerror = resolve;
+            document.head.appendChild(link);
+          } catch (e) {
+            resolve();
+          }
         });
-      };
-
-      // Wait for jQuery to load
-      const hasJQ = await waitFor(() => !!window.jQuery, 4000);
-      if (!hasJQ) return;
-      const $ = window.jQuery;
-
-      // Fetch modules.json from the repository
-      let modules;
-      try {
-        const resp = await fetch('https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/data/modules.json', { cache: 'no-store' });
-        if (!resp.ok) throw new Error('modules.json fetch failed');
-        modules = await resp.json();
-      } catch {
-        return;
       }
 
-      // Load FontAwesome from a CDN if not already loaded
-      function loadFontAwesome() {
-        if (document.getElementById('fontawesome_css')) return;
-        const css = document.createElement('link');
-        css.id = 'fontawesome_css';
-        css.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css';
-        css.rel = 'stylesheet';
-        css.type = 'text/css';
-        (document.head || document.documentElement).appendChild(css);
+      /**
+       * Wait for a selector to appear in the DOM. Uses MutationObserver
+       * and times out after the specified milliseconds.
+       * @param {string} selector CSS selector to wait for.
+       * @param {number} timeout Maximum time to wait in ms.
+       * @returns {Promise<Element|null>} Resolves with the element or null.
+       */
+      function waitForElement(selector, timeout) {
+        timeout = timeout || 4000;
+        return new Promise(function (resolve) {
+          const existing = document.querySelector(selector);
+          if (existing) {
+            resolve(existing);
+            return;
+          }
+          let timer;
+          const observer = new MutationObserver(() => {
+            const el = document.querySelector(selector);
+            if (el) {
+              clearTimeout(timer);
+              observer.disconnect();
+              resolve(el);
+            }
+          });
+          observer.observe(document.documentElement, { childList: true, subtree: true });
+          timer = setTimeout(() => {
+            observer.disconnect();
+            resolve(null);
+          }, timeout);
+        });
+      }
+
+      // Load the modules JSON.  Reuse cached data on window.CPToolkit if present.
+      async function getModules() {
+        if (window.CPToolkit && window.CPToolkit.modulesJson) {
+          return window.CPToolkit.modulesJson;
+        }
+        try {
+          const resp = await fetch('https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/data/modules.json', { cache: 'no-store' });
+          if (!resp.ok) throw new Error('modules.json fetch failed');
+          const data = await resp.json();
+          if (window.CPToolkit) {
+            window.CPToolkit.modulesJson = data;
+          }
+          return data;
+        } catch {
+          return null;
+        }
       }
 
       // Inject icons into the module list
-      function addIcons() {
+      async function addIcons() {
+        const modules = await getModules();
+        if (!modules) return;
+        await ensureFontAwesome();
         try {
-          loadFontAwesome();
           for (const moduleClass in modules) {
             const classObj = modules[moduleClass];
             for (const modName in classObj) {
@@ -109,12 +125,20 @@
               const faClass = modObj['default-icon'];
               if (!faClass) continue;
               const url = modObj['url'];
-              $('.cp-ModuleList-itemLink[href*="' + url + '"]').each(function () {
-                const link = $(this);
-                if (link.data('module-icons-added')) return;
-                link.prepend('<i class="' + faClass + '"></i>&nbsp;&nbsp;');
-                link.css('font-weight', 'bold');
-                link.data('module-icons-added', true);
+              const links = document.querySelectorAll('.cp-ModuleList-itemLink[href*="' + url + '"]');
+              links.forEach(function (link) {
+                if (link.dataset.moduleIconsAdded) return;
+                // Create the icon element
+                const icon = document.createElement('i');
+                icon.className = faClass;
+                // Insert icon at beginning of link
+                link.insertBefore(icon, link.firstChild);
+                // Add spacing after the icon
+                const spacer = document.createTextNode('\u00A0\u00A0');
+                link.insertBefore(spacer, link.firstChild.nextSibling);
+                // Bold the text
+                link.style.fontWeight = 'bold';
+                link.dataset.moduleIconsAdded = 'true';
               });
             }
           }
@@ -124,10 +148,13 @@
       }
 
       // Wait for the module list to appear
-      const hasList = await waitFor(() => $('.cp-ModuleList-itemLink').length > 0, 5000);
-      if (hasList) addIcons();
+      const listEl = await waitForElement('.cp-ModuleList-itemLink', 4000);
+      if (listEl) {
+        addIcons();
+      }
       // Re-run once after a short delay to catch dynamic changes
       setTimeout(addIcons, 2000);
     }
   };
 })();
+
