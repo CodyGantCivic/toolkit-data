@@ -1,27 +1,28 @@
-// Sanitized AdvancedStylesHelper for CivicPlus Toolkit
-// This helper enforces maximum lengths on advanced styles text areas
-// in the DesignCenter Theme and Widget managers. It exports a single
-// `init()` function and includes an idempotent guard so it runs only
-// once per page. All auto‑run logic and console logging from the
-// original script have been removed. Instead, the loader will call
-// `init()` on appropriate pages.
+// CivicPlus Toolkit - Advanced Styles Helper (Optimised)
+// This helper enforces maximum lengths on advanced styles text areas in the
+// DesignCenter’s Theme Manager and Widget Manager.  It has been modified
+// to use MutationObservers as a fallback for detecting dynamically created
+// popover text areas when no page functions are present, while keeping
+// the original page‑context injection needed to override functions defined
+// by the site.  The helper retains idempotent initialisation and exports
+// an `init()` function that the CP Toolkit loader will call.
 
 (function (global) {
   'use strict';
 
   var NAME = 'AdvancedStylesHelper';
   global[NAME] = global[NAME] || {};
-  // If already initialised, do nothing
+  // Guard: avoid multiple runs
   if (global[NAME].__loaded) {
     return;
   }
 
   /**
-   * Inject a function into the page context. This is necessary to
-   * override page‑defined functions like initializePopovers and
-   * InitializeWidgetOptionsModal, since Tampermonkey userscripts run in
-   * a sandbox separate from the page’s JavaScript context.
-   * @param {Function} fn The function to run in page context.
+   * Inject code into the page context.  Tampermonkey scripts run in a
+   * sandbox, so to override page functions we must insert a script tag
+   * into the DOM.  This helper wraps a function and runs it in the
+   * page’s global scope.
+   * @param {Function} fn
    */
   function runInPageContext(fn) {
     try {
@@ -30,128 +31,135 @@
       script.textContent = '(' + fn.toString() + ')();';
       (document.head || document.documentElement).appendChild(script);
       script.remove();
-    } catch (err) {
-      // Ignore injection errors
+    } catch (_) {
+      // Silently ignore any injection errors
     }
   }
 
   /**
-   * Apply maximum length enforcement on the Theme Manager. This
-   * overrides initializePopovers (if present) to set maxlength on
-   * textareas inside .cpPopOver. If initializePopovers does not yet
-   * exist, it adds a DOMContentLoaded fallback. It also ensures that
-   * existing popover textareas have the maxlength applied.
+   * Enforce maximum lengths in the Theme Manager.  This helper overrides
+   * the `initializePopovers` function when defined, or uses a
+   * MutationObserver fallback when it isn’t.  In both cases it sets
+   * `maxlength="1000"` on any textarea inside `.cpPopOver` elements.
    */
   function enforceThemeManager() {
     runInPageContext(function () {
       try {
-        // If the page has not defined initializePopovers yet, fall
-        // back to applying maxlength on DOMContentLoaded
+        // Helper to apply maxlength to all popover textareas
+        function applyMaxLength() {
+          try {
+            var textAreas = document.querySelectorAll('.cpPopOver textarea');
+            textAreas.forEach(function (el) {
+              el.setAttribute('maxlength', 1000);
+            });
+          } catch (_) {}
+        }
+        // If initializePopovers is not yet defined, use DOMContentLoaded and
+        // MutationObserver fallback to ensure future popovers also get the maxlength
         if (typeof window.initializePopovers === 'undefined') {
+          // Apply on DOMContentLoaded for initial popovers
           document.addEventListener(
             'DOMContentLoaded',
             function () {
-              try {
-                var ta = document.querySelectorAll('.cpPopOver textarea');
-                ta.forEach(function (t) {
-                  t.setAttribute('maxlength', 1000);
-                });
-              } catch (_) {}
+              applyMaxLength();
             },
             { once: true }
           );
+          // Observe additions of cpPopOver elements to handle dynamically
+          // generated popovers when there is no initializePopovers function
+          var themeObs = new MutationObserver(function (mutations) {
+            mutations.forEach(function (m) {
+              m.addedNodes.forEach(function (node) {
+                if (node.nodeType === 1) {
+                  if (node.matches && node.matches('.cpPopOver textarea')) {
+                    node.setAttribute('maxlength', 1000);
+                  }
+                  var textAreas = node.querySelectorAll ? node.querySelectorAll('.cpPopOver textarea') : [];
+                  textAreas.forEach(function (ta) {
+                    ta.setAttribute('maxlength', 1000);
+                  });
+                }
+              });
+            });
+          });
+          themeObs.observe(document.documentElement, { childList: true, subtree: true });
           return;
         }
-        // Save the original implementation once
+        // Otherwise, override initializePopovers once
         var originalInitializePopovers = window.initializePopovers;
-        // Avoid double wrapping
         if (!window.initializePopovers.__cpToolkit_override) {
           window.initializePopovers = function () {
             try {
-              // Call the original
               if (typeof originalInitializePopovers === 'function') {
                 originalInitializePopovers.apply(this, arguments);
               }
             } catch (_) {}
-            // Apply maxlength to any textareas in newly created popovers
-            try {
-              var textAreas = document.querySelectorAll('.cpPopOver textarea');
-              textAreas.forEach(function (el) {
-                el.setAttribute('maxlength', 1000);
-              });
-            } catch (_) {}
+            applyMaxLength();
           };
           window.initializePopovers.__cpToolkit_override = true;
         }
-        // Apply maxlength on any existing popover textareas
-        var existing = document.querySelectorAll('.cpPopOver textarea');
-        existing.forEach(function (el) {
-          el.setAttribute('maxlength', 1000);
-        });
+        // Apply maxlength to any existing popover textareas immediately
+        applyMaxLength();
       } catch (_) {
-        // Ignore errors
+        // ignore errors in theme manager enforcement
       }
     });
   }
 
   /**
-   * Apply maximum length enforcement on the Widget Manager. This
-   * overrides InitializeWidgetOptionsModal (if present) to set
-   * maxlength on the #MiscAdvStyles textarea. If the function is not
-   * defined, it uses a MutationObserver fallback to watch for the
-   * element. It also sets maxlength on an existing textarea if it
-   * already exists.
+   * Enforce maximum lengths in the Widget Manager.  This helper overrides
+   * `InitializeWidgetOptionsModal` when defined, or uses a MutationObserver
+   * fallback.  It sets `maxlength="255"` on the #MiscAdvStyles textarea.
    */
   function enforceWidgetManager() {
     runInPageContext(function () {
       try {
+        // Helper to set maxlength on #MiscAdvStyles when present
+        function setMaxLength() {
+          try {
+            var el = document.querySelector('#MiscAdvStyles');
+            if (el) {
+              el.setAttribute('maxlength', 255);
+            }
+          } catch (_) {}
+        }
         if (typeof window.InitializeWidgetOptionsModal === 'undefined') {
-          // Fallback: observe DOM until the element appears
-          var observer = new MutationObserver(function (mutations, obs) {
+          // Use MutationObserver to watch for the textarea when
+          // InitializeWidgetOptionsModal has not been defined yet
+          var obs = new MutationObserver(function (mutations, observer) {
+            setMaxLength();
+            var target = document.querySelector('#MiscAdvStyles');
+            if (target) {
+              observer.disconnect();
+            }
+          });
+          obs.observe(document.documentElement, { childList: true, subtree: true });
+          return;
+        }
+        var oldModal = window.InitializeWidgetOptionsModal;
+        if (!window.InitializeWidgetOptionsModal.__cpToolkit_override) {
+          window.InitializeWidgetOptionsModal = function () {
             try {
-              var el = document.querySelector('#MiscAdvStyles');
-              if (el) {
-                el.setAttribute('maxlength', 255);
-                obs.disconnect();
+              if (typeof oldModal === 'function') {
+                oldModal.apply(this, arguments);
               }
             } catch (_) {}
-          });
-          observer.observe(document.documentElement, { childList: true, subtree: true });
-        } else {
-          var oldModal = window.InitializeWidgetOptionsModal;
-          // Avoid double wrapping
-          if (!window.InitializeWidgetOptionsModal.__cpToolkit_override) {
-            window.InitializeWidgetOptionsModal = function () {
-              try {
-                if (typeof oldModal === 'function') {
-                  oldModal.apply(this, arguments);
-                }
-              } catch (_) {}
-              try {
-                var el = document.querySelector('#MiscAdvStyles');
-                if (el) {
-                  el.setAttribute('maxlength', 255);
-                }
-              } catch (_) {}
-            };
-            window.InitializeWidgetOptionsModal.__cpToolkit_override = true;
-          }
+            setMaxLength();
+          };
+          window.InitializeWidgetOptionsModal.__cpToolkit_override = true;
         }
-        // Set maxlength immediately if element already exists
-        var existing = document.querySelector('#MiscAdvStyles');
-        if (existing) {
-          existing.setAttribute('maxlength', 255);
-        }
+        // Apply maxlength on any existing textarea immediately
+        setMaxLength();
       } catch (_) {
-        // Ignore errors
+        // ignore errors in widget manager enforcement
       }
     });
   }
 
   /**
-   * Main initialiser function. Determines whether the current page
-   * corresponds to the Theme Manager or Widget Manager and applies
-   * appropriate maximum length enforcement.
+   * Main initialiser.  Determines whether we are on the Theme Manager or
+   * Widget Manager pages and applies the appropriate enforcement.  Once
+   * executed, it sets a __loaded flag to prevent multiple runs.
    */
   function init() {
     if (global[NAME].__loaded) {
@@ -173,10 +181,10 @@
         enforceWidgetManager();
       }
     } catch (_) {
-      // ignore errors
+      // ignore any errors in init
     }
   }
 
-  // Expose the init method on the global object
+  // Expose init on the global helper
   global[NAME].init = init;
 })(window);
