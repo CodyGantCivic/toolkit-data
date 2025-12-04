@@ -1,52 +1,31 @@
-// CivicPlus Toolkit: Title Changer Helper (sanitised)
-// This helper updates the page title based on breadcrumbs or selected view,
-// providing better context for administrators. It runs only once per page
-// when invoked by the Toolkit loader. All Chrome extension calls and
-// console logging have been removed.
+// CivicPlus Toolkit: Title Changer Helper (refactored)
+//
+// This helper updates the page title based on breadcrumbs or the selected
+// view on admin and design center pages.  It has been refactored to
+// eliminate the jQuery dependency and avoid polling.  The helper runs
+// automatically after the DOM is ready and performs a second pass
+// shortly thereafter to catch asynchronously loaded elements.
 
-;(function () {
+(function () {
   'use strict';
 
   const NS = 'TitleChanger';
-  // Idempotent guard: if this helper has already been loaded on the page, do nothing
+  // Prevent multiple initialisations
   if (window[NS] && window[NS].__loaded) {
     return;
   }
 
   /**
-   * Wait for a condition to be true or until a timeout elapses.
-   * @param {() => boolean} testFn Function that returns true when ready.
-   * @param {number} timeout Maximum time to wait in ms.
-   * @param {number} interval How often to check in ms.
-   * @returns {Promise<boolean>}
+   * Set the document title, preserving the original title if possible. If
+   * there is no original title, attempt to read a fallback from the
+   * toolbar label. This function is idempotent and silently ignores
+   * errors.
+   * @param {string} prefix The prefix to prepend to the title.
    */
-  function waitFor(testFn, timeout = 5000, interval = 50) {
-    const start = Date.now();
-    return new Promise((resolve) => {
-      (function check() {
-        try {
-          if (testFn()) {
-            return resolve(true);
-          }
-        } catch {
-          // ignore errors
-        }
-        if (Date.now() - start > timeout) {
-          return resolve(false);
-        }
-        setTimeout(check, interval);
-      })();
-    });
-  }
-
-  /**
-   * Internal function to set the document title, preserving the original title
-   * or, if absent, using the CP toolbar menu text as the fallback.
-   * @param {string} titleToSet The new title prefix to set.
-   */
-  function setTitle(titleToSet) {
+  function setTitle(prefix) {
     try {
       let originalTitle = document.title || '';
+      // If the current title is empty, try to get a meaningful label
       if (!originalTitle) {
         const toolbarLabel = document.querySelector('.cp-Toolbar-menu strong.ng-binding');
         if (toolbarLabel) {
@@ -56,18 +35,96 @@
       if (!originalTitle) {
         originalTitle = document.title;
       }
-      if (titleToSet) {
-        document.title = `${titleToSet} | ${originalTitle}`;
+      if (prefix && originalTitle) {
+        document.title = `${prefix} | ${originalTitle}`;
       }
-    } catch {
-      // ignore any errors
+    } catch (_) {
+      // ignore
     }
   }
 
   /**
-   * Initialise the title changer. Should be invoked by the Toolkit loader on
-   * admin or design center pages. Determines an appropriate title based on
-   * breadcrumbs, headers or selected view.
+   * Determine a suitable title for admin pages. This looks at the
+   * breadcrumb trail ('.wayfinder'), falling back to the page header
+   * ('.header h1') if necessary.  It also fixes the header for the
+   * Graphic Links page when no meaningful header is present.
+   */
+  function applyTitleForAdmin() {
+    const path = (window.location.pathname || '').toLowerCase();
+    // Special case for Graphic Links: ensure header text exists
+    if (path.startsWith('/admin/graphiclinks.aspx')) {
+      const headerTitle = document.getElementById('ctl00_ctl00_adminHeader_headerTitle');
+      if (headerTitle) {
+        headerTitle.textContent = 'Graphic Links';
+      }
+    }
+    let titleCandidate = '';
+    const wayfinder = document.querySelector('.wayfinder');
+    if (wayfinder) {
+      // Prefer an <em> inside the wayfinder
+      const em = wayfinder.querySelector('em');
+      if (em && em.textContent && em.textContent.trim()) {
+        titleCandidate = em.textContent.trim();
+      } else {
+        // Otherwise take the last breadcrumb link
+        const links = wayfinder.querySelectorAll('a');
+        if (links && links.length) {
+          const last = links[links.length - 1];
+          if (last && last.textContent && last.textContent.trim()) {
+            titleCandidate = last.textContent.trim();
+          }
+        }
+      }
+    }
+    if (!titleCandidate) {
+      // Fallback to the first H1 in the header
+      const header = document.querySelector('.header h1');
+      if (header && header.textContent && header.textContent.trim()) {
+        titleCandidate = header.textContent.trim();
+      }
+    }
+    if (titleCandidate) {
+      setTitle(titleCandidate);
+    }
+  }
+
+  /**
+   * Determine a suitable title for Design Center pages.  It reads the
+   * selected option from the #currentView dropdown.
+   */
+  function applyTitleForDesignCenter() {
+    let titleCandidate = '';
+    const currentView = document.getElementById('currentView');
+    if (currentView && currentView.options && currentView.options.length) {
+      const selectedIndex = currentView.selectedIndex;
+      if (selectedIndex >= 0) {
+        const selectedOption = currentView.options[selectedIndex];
+        if (selectedOption && selectedOption.text && selectedOption.text.trim()) {
+          titleCandidate = selectedOption.text.trim();
+        }
+      }
+    }
+    if (titleCandidate) {
+      setTitle(titleCandidate);
+    }
+  }
+
+  /**
+   * Run the appropriate title update based on the current URL path.
+   */
+  function updateTitle() {
+    const path = (window.location.pathname || '').toLowerCase();
+    if (path.startsWith('/admin/')) {
+      applyTitleForAdmin();
+    } else if (path.startsWith('/designcenter/')) {
+      applyTitleForDesignCenter();
+    }
+  }
+
+  /**
+   * Initialise the TitleChanger helper. Attaches update logic after the DOM
+   * is ready, then runs a second pass shortly thereafter to handle
+   * asynchronously loaded elements.  Subsequent calls are ignored.
    */
   function init() {
     if (window[NS] && window[NS].__loaded) {
@@ -75,103 +132,23 @@
     }
     window[NS] = window[NS] || {};
     window[NS].__loaded = true;
-
-    (async () => {
-      // Wait for jQuery and the DOM to be ready; fallback to vanilla if jQuery isn't present
-      await waitFor(() => window.jQuery || document.readyState !== 'loading');
-      const $ = window.jQuery;
-
-      // Determine current path
-      const path = (window.location.pathname || '').toLowerCase();
-      // Only run on admin or design center pages
-      if (!path.startsWith('/admin/') && !path.startsWith('/designcenter/')) {
-        return;
+    const runUpdate = () => {
+      try {
+        updateTitle();
+      } catch (_) {
+        // ignore errors
       }
-
-      const applyTitleForAdmin = () => {
-        // Special-case: Graphic Links admin page has no meaningful title; set one
-        if (path.startsWith('/admin/graphiclinks.aspx')) {
-          const headerTitle = document.getElementById('ctl00_ctl00_adminHeader_headerTitle');
-          if (headerTitle) {
-            headerTitle.textContent = 'Graphic Links';
-          }
-        }
-        // Look for breadcrumb labels inside the wayfinder
-        let titleCandidate = '';
-        if ($) {
-          const breadcrumbEm = $('.wayfinder').find('em').first();
-          if (breadcrumbEm.length && breadcrumbEm.text().trim()) {
-            titleCandidate = breadcrumbEm.text().trim();
-          } else {
-            const breadcrumbLink = $('.wayfinder a').last();
-            if (breadcrumbLink.length && breadcrumbLink.text().trim()) {
-              titleCandidate = breadcrumbLink.text().trim();
-            } else {
-              const header = $('.header').find('h1').first();
-              if (header.length && header.text().trim()) {
-                titleCandidate = header.text().trim();
-              }
-            }
-          }
-        } else {
-          // Vanilla fallback
-          const wayfinder = document.querySelector('.wayfinder');
-          if (wayfinder) {
-            const em = wayfinder.querySelector('em');
-            if (em && em.textContent.trim()) {
-              titleCandidate = em.textContent.trim();
-            } else {
-              const links = wayfinder.querySelectorAll('a');
-              if (links.length) {
-                const last = links[links.length - 1];
-                if (last && last.textContent.trim()) {
-                  titleCandidate = last.textContent.trim();
-                }
-              }
-            }
-          }
-          if (!titleCandidate) {
-            const header = document.querySelector('.header h1');
-            if (header && header.textContent.trim()) {
-              titleCandidate = header.textContent.trim();
-            }
-          }
-        }
-        if (titleCandidate) {
-          setTitle(titleCandidate);
-        }
-      };
-
-      const applyTitleForDesignCenter = () => {
-        let titleCandidate = '';
-        if ($) {
-          const selected = $('#currentView option:selected').first();
-          if (selected.length && selected.text().trim()) {
-            titleCandidate = selected.text().trim();
-          }
-        } else {
-          const currentView = document.getElementById('currentView');
-          if (currentView) {
-            const selectedOption = currentView.options[currentView.selectedIndex];
-            if (selectedOption && selectedOption.text.trim()) {
-              titleCandidate = selectedOption.text.trim();
-            }
-          }
-        }
-        if (titleCandidate) {
-          setTitle(titleCandidate);
-        }
-      };
-
-      if (path.startsWith('/admin/')) {
-        applyTitleForAdmin();
-      } else if (path.startsWith('/designcenter/')) {
-        applyTitleForDesignCenter();
-      }
-    })();
+    };
+    if (document.readyState !== 'loading') {
+      runUpdate();
+    } else {
+      document.addEventListener('DOMContentLoaded', runUpdate);
+    }
+    // Run a second update after a short delay to catch dynamic content
+    setTimeout(runUpdate, 2000);
   }
 
-  // Expose the helper's API
+  // Expose the helper API
   window[NS] = window[NS] || {};
   window[NS].init = init;
 })();
