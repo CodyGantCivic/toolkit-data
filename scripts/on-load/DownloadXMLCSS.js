@@ -1,12 +1,15 @@
-// DownloadXMLCSS.js - Sanitized CivicPlus Toolkit helper
+// DownloadXMLCSS.js - Optimised CivicPlus Toolkit helper
 //
 // This helper adds quick download buttons for XML and CSS files to
-// each layout item on the Design Center layouts page. It exposes
+// each layout item on the Design Center layouts page.  It exposes
 // a single `init()` function under `window.DownloadXMLCSS` and does
-// not auto‑run on its own. The loader will call `init()` only on
-// appropriate CivicPlus pages. The helper waits for jQuery to
-// become available, loads FontAwesome from a CDN if necessary, and
-// inserts per‑layout download links and a bulk download button. A
+// not auto‑run on its own.  The loader will call `init()` only on
+// appropriate CivicPlus pages.
+//
+// This version removes the dependency on jQuery and polling for
+// availability.  It uses a MutationObserver-based `waitForElement()`
+// to detect when the layout list is present, caches FontAwesome
+// loading, and performs all DOM operations with native APIs.  A
 // simple idempotent guard prevents duplicate initialisation.
 
 (function () {
@@ -15,29 +18,6 @@
   // If already loaded, do nothing.
   if (window.DownloadXMLCSS && window.DownloadXMLCSS.__loaded) {
     return;
-  }
-
-  /**
-   * Wait for jQuery to be available. Resolves with the jQuery
-   * function or null if not found within the timeout.
-   * @param {number} timeout Maximum time to wait in milliseconds.
-   * @returns {Promise<any|null>}
-   */
-  function waitForJQuery(timeout) {
-    timeout = timeout || 3000;
-    return new Promise(function (resolve) {
-      if (window.jQuery) return resolve(window.jQuery);
-      var waited = 0;
-      var handle = setInterval(function () {
-        if (window.jQuery) {
-          clearInterval(handle);
-          resolve(window.jQuery);
-        } else if ((waited += 200) >= timeout) {
-          clearInterval(handle);
-          resolve(null);
-        }
-      }, 200);
-    });
   }
 
   /**
@@ -89,14 +69,44 @@
   }
 
   /**
+   * Wait for a selector to appear in the DOM. Uses MutationObserver
+   * and times out after the specified milliseconds.
+   * @param {string} selector CSS selector to wait for.
+   * @param {number} timeout Maximum time to wait in ms.
+   * @returns {Promise<Element|null>} Resolves with the element or null.
+   */
+  function waitForElement(selector, timeout) {
+    timeout = timeout || 3000;
+    return new Promise(function (resolve) {
+      const existing = document.querySelector(selector);
+      if (existing) {
+        resolve(existing);
+        return;
+      }
+      let timer;
+      const observer = new MutationObserver(() => {
+        const el = document.querySelector(selector);
+        if (el) {
+          clearTimeout(timer);
+          observer.disconnect();
+          resolve(el);
+        }
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      timer = setTimeout(() => {
+        observer.disconnect();
+        resolve(null);
+      }, timeout);
+    });
+  }
+
+  /**
    * Insert download buttons for each layout item and a bulk download
-   * button on the layouts page. Requires jQuery and FontAwesome.
+   * button on the layouts page.  Requires FontAwesome loaded.
    */
   async function insertDownloadButtons() {
     // Only run once per page.
     if (window.__cp_downloadxmlcss_initialized) return;
-    var $ = await waitForJQuery();
-    if (!$) return;
     await ensureFontAwesome();
     // Inject CSS styles
     addStyles(
@@ -121,8 +131,8 @@
       ].join('\n')
     );
     try {
-      var layouts = $('.listing .items .item');
-      var currentSite = document.location.host.replace(/[:\/]+/g, '-');
+      const items = document.querySelectorAll('.listing .items .item');
+      const currentSite = document.location.host.replace(/[:\/]+/g, '-');
       // Helper to trigger a download by creating and clicking an anchor
       function downloadItem(title, url) {
         try {
@@ -131,66 +141,82 @@
             ? url
             : window.location.origin.replace(/\/$/, '') + '/' + url.replace(/^\//, '');
           a.download = title;
+          a.style.display = 'none';
+          document.body.appendChild(a);
           a.click();
+          document.body.removeChild(a);
         } catch (_) {
           window.open(url, '_blank');
         }
       }
-      layouts.each(function () {
-        var $item = $(this);
-        if ($item.data('cp-dl-added')) return;
-        $item.data('cp-dl-added', true);
-        var thisLayoutName = $item.find('h3 a').text().trim();
+      items.forEach(function (item) {
+        if (item.dataset.cpDlAdded) return;
+        item.dataset.cpDlAdded = 'true';
+        const nameAnchor = item.querySelector('h3 a');
+        const thisLayoutName = nameAnchor ? nameAnchor.textContent.trim() : '';
         if (!thisLayoutName) return;
         // Create XML button
-        var downloadXML = $("<a href='#' class='button downloadXML'><i class='fa fa-download'></i><span>XML</span></a>");
-        downloadXML.on('click', function (e) {
+        const downloadXML = document.createElement('a');
+        downloadXML.href = '#';
+        downloadXML.className = 'button downloadXML';
+        downloadXML.innerHTML = "<i class='fa fa-download'></i><span>XML</span>";
+        downloadXML.addEventListener('click', function (e) {
           e.preventDefault();
-          var url = '/App_Themes/' + encodeURIComponent(thisLayoutName) + '/' + encodeURIComponent(thisLayoutName) + '.xml';
+          const url = '/App_Themes/' + encodeURIComponent(thisLayoutName) + '/' + encodeURIComponent(thisLayoutName) + '.xml';
           downloadItem(currentSite + '-' + thisLayoutName + '.xml', url);
         });
         // Determine layout page link for CSS download
-        var layoutPage =
-          $item.find("a:contains('Layout Page'), a:contains('View Layout Page')").attr('href') ||
-          $item.find('h3 a').attr('href');
+        let layoutPage = null;
+        // Try to find link containing 'Layout Page' or 'View Layout Page'
+        const anchors = Array.from(item.querySelectorAll('a'));
+        const pageLink = anchors.find(a => /Layout Page|View Layout Page/i.test(a.textContent));
+        if (pageLink) {
+          layoutPage = pageLink.href;
+        } else if (nameAnchor) {
+          layoutPage = nameAnchor.href;
+        }
         // Create CSS button
-        var downloadCSS = $("<a href='#' class='button downloadCSS'><i class='fa fa-download'></i><span>CSS</span></a>");
-        downloadCSS.on('click', function (e) {
+        const downloadCSS = document.createElement('a');
+        downloadCSS.href = '#';
+        downloadCSS.className = 'button downloadCSS';
+        downloadCSS.innerHTML = "<i class='fa fa-download'></i><span>CSS</span>";
+        downloadCSS.addEventListener('click', async function (e) {
           e.preventDefault();
           if (!layoutPage) return;
-          var xhr = new XMLHttpRequest();
-          xhr.onreadystatechange = function () {
-            if (xhr.readyState === 4 && xhr.status === 200) {
-              var redirectedURL = xhr.responseURL;
-              $.get(
-                redirectedURL + '?bundle=off',
-                function (data) {
-                  var match = data.match(/\/App_Themes\/[^\"]*Layout[^\"]*/);
-                  if (match) {
-                    downloadItem(currentSite + '-' + thisLayoutName + '.css', match[0]);
-                  }
-                },
-                'text'
-              );
+          try {
+            const resp = await fetch(layoutPage);
+            if (resp.ok) {
+              const text = await resp.text();
+              const match = text.match(/\/App_Themes\/[^\"]*Layout[^\"]*/);
+              if (match) {
+                downloadItem(currentSite + '-' + thisLayoutName + '.css', match[0]);
+              }
             }
-          };
-          xhr.open('GET', layoutPage, true);
-          xhr.send();
+          } catch (_) {
+            // ignore errors
+          }
         });
         // Append buttons
-        $item.append(downloadXML, downloadCSS);
+        item.appendChild(downloadXML);
+        item.appendChild(downloadCSS);
       });
       // Add bulk download button if not present
-      var $sidebarButtons = $('.contentContainer .sidebar .buttons');
-      if ($sidebarButtons.length && !$sidebarButtons.find('.cp-download-all').length) {
-        var allBtn = $("<li class='cp-download-all'><a class='button bigButton nextAction' href='#'><span>Download All CSS and XML</span></a></li>");
-        allBtn.on('click', function (e) {
+      const sidebarButtons = document.querySelector('.contentContainer .sidebar .buttons');
+      if (sidebarButtons && !sidebarButtons.querySelector('.cp-download-all')) {
+        const li = document.createElement('li');
+        li.className = 'cp-download-all';
+        const a = document.createElement('a');
+        a.className = 'button bigButton nextAction';
+        a.href = '#';
+        a.innerHTML = '<span>Download All CSS and XML</span>';
+        a.addEventListener('click', function (e) {
           e.preventDefault();
-          $('.downloadXML, .downloadCSS').each(function () {
-            $(this).trigger('click');
+          document.querySelectorAll('.downloadXML, .downloadCSS').forEach(btn => {
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
           });
         });
-        $sidebarButtons.append(allBtn);
+        li.appendChild(a);
+        sidebarButtons.appendChild(li);
       }
       window.__cp_downloadxmlcss_initialized = true;
     } catch (e) {
@@ -200,12 +226,15 @@
 
   /**
    * Public init function called by the loader. Ensures idempotent
-   * initialisation and triggers insertion of download buttons.
+   * initialisation and triggers insertion of download buttons when
+   * the layout list becomes available.
    */
   function init() {
     if (window.DownloadXMLCSS.__loaded) return;
     window.DownloadXMLCSS.__loaded = true;
-    insertDownloadButtons();
+    waitForElement('.listing .items', 3000).then(function () {
+      insertDownloadButtons();
+    });
   }
 
   // Expose helper on the global object
