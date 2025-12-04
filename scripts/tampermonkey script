@@ -14,17 +14,107 @@
   const TOOL_NAME = '[CP Toolkit Loader]';
   const STORAGE_KEY = 'cptoolkit.enabledScripts.v1';
 
-  // ======= Script registry: add your helpers here =======
+    // ======= Script registry: add your helpers here =======
   const scriptRegistry = [
-    { id: 'download_xml_css', name: 'Download XML/CSS', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/DownloadXMLCSS.js', pages: ['/admin/designcenter/layouts'] },
+    // 1) Graphic link helpers: run first on the Graphic Links admin page. These helpers
+    // run only on `/admin/graphiclinks*` and will be skipped on other pages.
+    { id: 'graphic_link_helper', name: 'Graphic Link Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/GraphicLinkHelper.js', pages: ['/admin/graphiclinks*'] },
+    { id: 'graphic_link_autofill', name: 'Graphic Link Autofill', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/graphiclinkautofill.js', pages: ['/admin/graphiclinks.aspx*'] },
+
+    // 2) Widget/theme helpers: prioritize these on Design Center theme pages before module icons
+    // so they initialize styling and enhancements early on theme pages.
     { id: 'advanced_styles', name: 'Advanced Styles Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AdvancedStylesHelper.js', pages: ['/designcenter/themes*','/designcenter/widgets*'] },
     { id: 'widget_skin', name: 'Widget Skin Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/widgetSkinHelper.js', pages: ['/designcenter/themes*'] },
-    { id: 'graphic_link_helper', name: 'Graphic Link Helper', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/GraphicLinkHelper.js', pages: ['/admin/graphiclinks*'] },
+    { id: 'theme_manager_enhancer', name: 'Theme Manager Enhancer', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/ThemeManagerEnhancer.js', pages: ['/designcenter/themes*','/designcenter/widgets*','/designcenter/animations*'] },
+    { id: 'widget_skin_default_override', name: 'Widget Skin Default Override', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/widget-skin-default-override.js', pages: ['/designcenter/themes*'] },
+
+    // 3) Module icons helper: adds FontAwesome icons to favorite modules on all CivicPlus pages
+    { id: 'module_icons', name: 'Module Icons', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/moduleIcons.js', pages: ['*'] },
+
+    // 4) Other helpers for specific pages
+    { id: 'download_xml_css', name: 'Download XML/CSS', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/DownloadXMLCSS.js', pages: ['/admin/designcenter/layouts*'] },
     { id: 'xml_major_change_alert', name: 'XML Major Change Alert', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/XMLMajorChangeAlert.js', pages: ['/admin/designcenter/layouts/modify*'] },
     { id: 'allow_open_in_new_tab', name: 'Allow Open In New Tab', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/AllowOpenInNewTab.js', pages: ['/admin*'] },
+    { id: 'multiple_quick_links', name: 'Multiple Quick Links', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleQuickLinks.js', pages: ['/admin/quicklinks.aspx*'] },
+    { id: 'multiple_category_upload', name: 'Multiple Category Upload', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleCategoryUpload.js', pages: ['/admin/infoii.aspx*','/admin/graphiclinks.aspx*','/admin/quicklinks.aspx*'] },
+    { id: 'multiple_item_upload', name: 'Multiple Item Upload', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/cp-MultipleItemUpload.js', pages: ['/admin/civicalerts.aspx*'] },
+    { id: 'input_focus', name: 'Input Focus', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/input-focus.js', pages: ['/admin*'] },
+    { id: 'keyboard_shortcuts', name: 'Keyboard Shortcuts', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/keyboard-shortcuts.js', pages: ['/admin*'] },
+    { id: 'title_changer', name: 'Title Changer', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/title-changer.js', pages: ['/admin*','/designcenter*'] },
+
+    // 5) Helpers to run last on all pages: auto-dismiss and session timeout prevention
+    { id: 'auto_dismiss_help_welcome', name: 'Auto Dismiss Help Welcome', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/auto-dismiss-help-welcome.js', pages: ['*'] },
     { id: 'prevent_session_timeout', name: 'Prevent Session Timeout', url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on-load/PreventSessionTimeout.js', pages: ['/admin*','/designcenter*'] }
   ];
+
+  // On-demand registry: tools that run only when the user explicitly clicks on them
+  // These helpers are not injected automatically on page load. Each entry should
+  // specify a unique id, a human-friendly name, and the raw GitHub URL for the script.
+  const onDemandRegistry = [
+    {
+      id: 'copy_comprehensive',
+      name: 'Copy Comprehensive Script',
+      url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on%20demand/copyComprehensive.js'
+    }
+    ,
+    {
+      id: 'setup_defaults_v2',
+      name: 'Setup Defaults V2',
+      url: 'https://raw.githubusercontent.com/CodyGantCivic/toolkit-data/main/scripts/on%20demand/setupDefaultsV2.js'
+    }
+    // Add additional on-demand tools here by listing their id, name, and GitHub raw URL.
+  ];
   // ======================================================
+  // Run an on-demand tool: fetch the script from GitHub and inject it.
+  async function runOnDemand(entry) {
+    try {
+      // Prevent multiple injections of the same tool
+      if (window.CPToolkit && window.CPToolkit.injectedScripts && window.CPToolkit.injectedScripts[entry.id]) {
+        return;
+      }
+      // For setup_defaults_v2, temporarily override prompt/confirm to avoid interactive dialogs.
+      let origPrompt, origConfirm;
+      const overridePrompt = () => '';
+      const overrideConfirm = () => false;
+      const needsOverride = entry && entry.id === 'setup_defaults_v2';
+      if (needsOverride) {
+        origPrompt = window.prompt;
+        origConfirm = window.confirm;
+        try {
+          window.prompt = overridePrompt;
+          window.confirm = overrideConfirm;
+        } catch (_) {
+          // ignore if we cannot override
+        }
+      }
+      const resp = await fetch(entry.url, { cache: 'no-store' });
+      if (!resp.ok) throw new Error('fetch failed ' + resp.status);
+      const code = await resp.text();
+      const el = document.createElement('script');
+      el.type = 'text/javascript';
+      el.setAttribute('data-cp-on-demand-id', entry.id);
+      el.textContent = code + '\n//# sourceURL=' + entry.url + '\n';
+      (document.head || document.documentElement).appendChild(el);
+      window.CPToolkit.injectedScripts = window.CPToolkit.injectedScripts || {};
+      window.CPToolkit.injectedScripts[entry.id] = true;
+      // Restore prompt/confirm for setup_defaults_v2
+      if (needsOverride) {
+        try {
+          window.prompt = origPrompt;
+          window.confirm = origConfirm;
+        } catch (_) {
+          // ignore restore errors
+        }
+      }
+    } catch (e) {
+      console.error(TOOL_NAME + ' on-demand run failed for ' + entry.name, e);
+      // Restore prompt/confirm in case of error
+      try {
+        if (origPrompt) window.prompt = origPrompt;
+        if (origConfirm) window.confirm = origConfirm;
+      } catch (_) {}
+    }
+  }
 
   if (window.top !== window.self) return;
 
@@ -96,7 +186,22 @@
         #cptoolkit-fab .label {
           display: none;
         }
-        #cptoolkit-modal { display: none; position: fixed; right: 20px; bottom: 80px; width: 420px; max-height: 70vh; overflow: auto; background: #fff; border-radius: 10px; box-shadow: 0 12px 30px rgba(4,12,20,0.3); z-index: 2147483001; padding: 12px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+        #cptoolkit-modal {
+          display: none;
+          position: fixed;
+          right: 20px;
+          /* Position the modal directly beneath the icon */
+          top: 80px;
+          width: 420px;
+          max-height: 70vh;
+          overflow: auto;
+          background: #fff;
+          border-radius: 10px;
+          box-shadow: 0 12px 30px rgba(4,12,20,0.3);
+          z-index: 2147483001;
+          padding: 12px;
+          font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+        }
         #cptoolkit-modal h3 { margin:0 0 8px 0; font-size:14px;}
         .cptoolkit-entry { display:flex; align-items:center; justify-content:space-between; padding:8px 6px; border-bottom: 1px solid #eef2ff;}
         .cptoolkit-entry .left { display:flex; gap:8px; align-items:center; }
@@ -104,8 +209,12 @@
         .cptoolkit-controls { display:flex; gap:6px; margin-top:8px; }
         .cptoolkit-btn { padding:6px 10px; border-radius:6px; cursor:pointer; background:#f3f4f6; border:1px solid #e5e7eb; font-size:13px; }
         /* Use CivicPlus red accent color instead of blue */
-        .cptoolkit-btn.primary { background:#CC0020; color:#fff; border-color:transparent; }
+        .cptoolkit-btn.primary { background:#CC0020; color:#fff; border-color:transparent; line-height:1.2; }
         .cptoolkit-link { font-size:12px; color:#CC0020; text-decoration: none; margin-left:6px; }
+        /* Ensure on-load caret arrow is consistent size when collapsed and expanded */
+        #cptoolkit-onload-caret {
+          font-size: 14px;
+        }
       </style>
 
       <div id="cptoolkit-fab" title="CP Toolkit" tabindex="0" role="button" aria-label="Open CP Toolkit">
@@ -113,12 +222,18 @@
         <div class="label">CP</div>
       </div>
 
-      <div id="cptoolkit-modal" role="dialog" aria-label="On-load scripts manager">
-        <h3>On-load Scripts Manager</h3>
-        <div id="cptoolkit-list"></div>
-        <div class="cptoolkit-controls">
-          <button id="cptoolkit-enable-all" class="cptoolkit-btn">Enable all</button>
-          <button id="cptoolkit-disable-all" class="cptoolkit-btn">Disable all</button>
+      <div id="cptoolkit-modal" role="dialog" aria-label="CP Toolkit manager">
+        <!-- On-demand tools section first -->
+        <h3>On-demand Tools</h3>
+        <div id="cptoolkit-ondemand-list"></div>
+        <!-- Collapsible on-load section. Clicking the heading toggles visibility -->
+        <h3 id="cptoolkit-onload-toggle" style="margin-top:14px; cursor:pointer; display:flex; align-items:center; gap:6px;">On-load Scripts <span id="cptoolkit-onload-caret">▶</span></h3>
+        <div id="cptoolkit-onload-section" style="display:none;">
+          <div id="cptoolkit-list"></div>
+          <div class="cptoolkit-controls">
+            <button id="cptoolkit-enable-all" class="cptoolkit-btn">Enable all</button>
+            <button id="cptoolkit-disable-all" class="cptoolkit-btn">Disable all</button>
+          </div>
         </div>
       </div>
     `;
@@ -156,16 +271,78 @@
     }
     renderList();
 
-    let visible = false, hideTimer = null;
-    function show() { if (visible) return; visible = true; fab.style.right = '8px'; }
+    // Render the list of on-demand tools. These tools are not enabled/disabled; each row
+    // shows a run button that fetches and executes the script on demand.
+    function renderOnDemandList() {
+      const ond = document.getElementById('cptoolkit-ondemand-list');
+      if (!ond) return;
+      ond.innerHTML = '';
+      onDemandRegistry.forEach(entry => {
+        const row = document.createElement('div');
+        row.className = 'cptoolkit-entry';
+        const left = document.createElement('div');
+        left.className = 'left';
+        // On-demand entries only need a name; no page patterns
+        const title = document.createElement('div');
+        title.innerHTML = '<strong>' + entry.name + '</strong>';
+        left.appendChild(title);
+        const right = document.createElement('div');
+        right.style.display = 'flex';
+        right.style.alignItems = 'center';
+        right.style.gap = '6px';
+        const runBtn = document.createElement('button');
+        runBtn.className = 'cptoolkit-btn primary';
+        runBtn.textContent = 'Run';
+        runBtn.addEventListener('click', () => {
+          runOnDemand(entry);
+        });
+        right.appendChild(runBtn);
+        row.appendChild(left);
+        row.appendChild(right);
+        ond.appendChild(row);
+      });
+    }
+    // After rendering the on-load list, render the on-demand list
+    renderOnDemandList();
+
+    // Set up toggle behavior for the on-load scripts section. When the user clicks
+    // the heading, show or hide the on-load list and update the caret. The
+    // caret uses ► for collapsed and ▼ for expanded states. By default the
+    // section is collapsed (display: none) and the caret shows ►.
+    const onloadToggle = document.getElementById('cptoolkit-onload-toggle');
+    const onloadSection = document.getElementById('cptoolkit-onload-section');
+    const onloadCaret = document.getElementById('cptoolkit-onload-caret');
+    let onLoadExpanded = false;
+    if (onloadToggle && onloadSection && onloadCaret) {
+      onloadToggle.addEventListener('click', () => {
+        onLoadExpanded = !onLoadExpanded;
+        if (onLoadExpanded) {
+          onloadSection.style.display = 'block';
+          onloadCaret.textContent = '▼';
+        } else {
+          onloadSection.style.display = 'none';
+          // Use the same caret symbol for collapsed state as in the markup
+          onloadCaret.textContent = '▶';
+        }
+      });
+    }
+
+    // Track whether the manager panel is open. When open, the FAB remains visible.
+    let visible = false, hideTimer = null, managerOpen = false;
+    function show() {
+      if (visible) return;
+      visible = true;
+      fab.style.right = '8px';
+    }
+    // Hide the FAB only if the manager is not open. Matches the CSS offset (right: -60px).
     function hide() {
-      if (!visible) return;
+      if (!visible || managerOpen) return;
       visible = false;
-      // Match the offset used in the CSS definition (right: -60px)
       fab.style.right = '-60px';
     }
+    // Show the FAB when the mouse is near the top-right corner or over the button;
+    // hide it when the mouse moves away and the manager is closed.
     document.addEventListener('mousemove', function (e) {
-      // Detect proximity: near the right edge and near the top (within 120px)
       const dx = window.innerWidth - e.clientX;
       const nearRight = dx <= 24;
       const nearTop = e.clientY <= 120;
@@ -175,24 +352,46 @@
         return;
       }
       const rect = fab.getBoundingClientRect();
-      const over = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      const over = e.clientX >= rect.left && e.clientX <= rect.right &&
+                   e.clientY >= rect.top && e.clientY <= rect.bottom;
       if (over) {
         if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
         show();
         return;
       }
-      if (visible && !hideTimer) hideTimer = setTimeout(hide, 700);
+      if (visible && !hideTimer) {
+        hideTimer = setTimeout(() => {
+          hide();
+          hideTimer = null;
+        }, 700);
+      }
     }, { passive: true });
 
-    fab.addEventListener('click', () => { modal.style.display = modal.style.display === 'block' ? 'none' : 'block'; if (modal.style.display === 'block') show(); });
-    document.getElementById('cptoolkit-enable-all').addEventListener('click', () => { scriptRegistry.forEach(s => map[s.id] = true); renderList(); });
-    document.getElementById('cptoolkit-disable-all').addEventListener('click', () => { scriptRegistry.forEach(s => map[s.id] = false); renderList(); });
-
-    // Close the manager when the mouse leaves the modal area
-    modal.addEventListener('mouseleave', () => {
-      // Hide the modal and slide the fab back
-      modal.style.display = 'none';
-      hide();
+    // Clicking the FAB toggles the manager panel. When opened, the FAB stays out.
+    fab.addEventListener('click', () => {
+      // Cancel any pending hide timers
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+      managerOpen = !managerOpen;
+      if (managerOpen) {
+        modal.style.display = 'block';
+        show();
+      } else {
+        modal.style.display = 'none';
+        // After closing, slide the FAB back in
+        hide();
+      }
+    });
+    // Enable/Disable all buttons still function as before.
+    document.getElementById('cptoolkit-enable-all').addEventListener('click', () => {
+      scriptRegistry.forEach(s => map[s.id] = true);
+      renderList();
+    });
+    document.getElementById('cptoolkit-disable-all').addEventListener('click', () => {
+      scriptRegistry.forEach(s => map[s.id] = false);
+      renderList();
     });
   }
 
@@ -216,23 +415,34 @@
 
   // CivicPlus detection
   async function isCivicPlusSite() {
+    // If detection has already completed, return the cached result to avoid
+    // additional network requests. The loader sets window.CPToolkit and
+    // caches the detection result on the property `isCivicPlusSiteResult`.
+    if (window.CPToolkit && typeof window.CPToolkit.isCivicPlusSiteResult !== 'undefined') {
+      return window.CPToolkit.isCivicPlusSiteResult;
+    }
     try {
       const testUrl = `${window.location.origin}/Assets/Mystique/Shared/Components/ModuleTiles/Templates/cp-Module-Tile.html`;
       const res = await fetch(testUrl, { method: 'HEAD', cache: 'no-store' }).catch(()=>null);
       if (res && (res.ok || res.type === 'opaque')) {
-        console.log('CivicPlus detected');
+        // Cache the detection result on CPToolkit so subsequent calls can reuse it
+        if (window.CPToolkit) window.CPToolkit.isCivicPlusSiteResult = true;
         return true;
       }
       if (res && res.status === 405) {
         const r2 = await fetch(testUrl, { method: 'GET', cache: 'no-store' }).catch(()=>null);
         if (r2 && (r2.ok || r2.type === 'opaque')) {
-          console.log('CivicPlus detected');
+          if (window.CPToolkit) window.CPToolkit.isCivicPlusSiteResult = true;
           return true;
         }
       }
+      // If none of the detection methods succeeded, cache a false result
+      if (window.CPToolkit) window.CPToolkit.isCivicPlusSiteResult = false;
       return false;
     } catch (e) {
+      // On error, log and cache a false result to avoid repeated network calls
       console.error(TOOL_NAME + ' detection error', e);
+      if (window.CPToolkit) window.CPToolkit.isCivicPlusSiteResult = false;
       return false;
     }
   }
@@ -294,6 +504,16 @@
 
       if (entry.id === 'allow_open_in_new_tab') {
         const g = await waitForGlobal('AllowOpenInNewTab', 1500);
+        if (g && typeof g.init === 'function') {
+          try { g.init(); } catch (e) { console.error(TOOL_NAME + ' error calling init for ' + entry.name, e); }
+        }
+        return true;
+      }
+
+      // DownloadXMLCSS helper exports `window.DownloadXMLCSS`. Without this special case,
+      // the loader candidates would not match because the name contains slashes in the entry name.
+      if (entry.id === 'download_xml_css') {
+        const g = await waitForGlobal('DownloadXMLCSS', 2000);
         if (g && typeof g.init === 'function') {
           try { g.init(); } catch (e) { console.error(TOOL_NAME + ' error calling init for ' + entry.name, e); }
         }
